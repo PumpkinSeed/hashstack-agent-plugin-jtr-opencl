@@ -1,0 +1,17 @@
+Source: hashstack-agent-plugin-jtr-opencl
+Maintainer: Jeremi Gosney <jgosney@stricture-group.com> 
+Section: misc
+Priority: important
+Standards-Version: 3.9.2
+Build-Depends: build-essential, libssl-dev, libpcap-dev, libgmp-dev, pkg-config, autoconf, automake, m4
+
+Package: hashstack-agent-plugin-jtr-opencl
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, fglrx
+Recommends: hashstack-agent, hashstack-agent-plugin-hashcat-cli, hashstack-agent-utils, statsprocessor
+Conflicts: hashstack-agent-plugin-jtr-cuda, hashstack-agent-plugin-jtr-nogpu
+Replaces: hashstack-agent-plugin-jtr
+Provides: hashstack-agent-plugin-jtr
+Description: John the Ripper agent plugin for Hashstack - AMD OpenCL support
+ John the Ripper agent plugin for Hashstack with AMD OpenCL support
+
