@@ -22,7 +22,11 @@ john_register_one(&fmt_NETHALFLM);
 
 #include <string.h>
 #ifdef _OPENMP
+#ifdef __MIC__
+#define OMP_SCALE	2048
+#else
 #define OMP_SCALE	65536
+#endif // __MIC__
 #include <omp.h>
 #endif
 
@@ -83,9 +87,19 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_plain = mem_calloc_tiny(sizeof(*saved_plain) * self->params.max_keys_per_crypt, MEM_ALIGN_NONE);
-	saved_pre = mem_calloc_tiny(sizeof(*saved_pre) * self->params.max_keys_per_crypt, MEM_ALIGN_NONE);
-	output = mem_calloc_tiny(sizeof(*output) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_plain = mem_calloc(self->params.max_keys_per_crypt,
+	                         sizeof(*saved_plain));
+	saved_pre = mem_calloc(self->params.max_keys_per_crypt,
+	                       sizeof(*saved_pre));
+	output = mem_calloc(self->params.max_keys_per_crypt,
+	                    sizeof(*output));
+}
+
+static void done(void)
+{
+	MEM_FREE(output);
+	MEM_FREE(saved_pre);
+	MEM_FREE(saved_plain);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -323,7 +337,7 @@ struct fmt_main fmt_NETHALFLM = {
 		tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		prepare,
 		valid,

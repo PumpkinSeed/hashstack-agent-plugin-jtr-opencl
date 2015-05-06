@@ -37,7 +37,11 @@ john_register_one(&fmt_FGT);
 #include "sse-intrinsics.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifdef __MIC__
+#define OMP_SCALE               8192
+#else
 #define OMP_SCALE               32768 // tuned on AMD K8 dual-HT (XOP)
+#endif // __MIC__
 #endif
 #include "memdbg.h"
 
@@ -89,12 +93,19 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_key = mem_calloc_tiny(sizeof(*crypt_key) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	saved_key_len = mem_calloc_tiny(sizeof(*saved_key_len) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_key = mem_calloc(self->params.max_keys_per_crypt,
+	                       sizeof(*saved_key));
+	crypt_key = mem_calloc(self->params.max_keys_per_crypt,
+	                       sizeof(*crypt_key));
+	saved_key_len = mem_calloc(self->params.max_keys_per_crypt,
+	                           sizeof(*saved_key_len));
+}
+
+static void done(void)
+{
+	MEM_FREE(saved_key_len);
+	MEM_FREE(crypt_key);
+	MEM_FREE(saved_key);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -138,7 +149,7 @@ static char * get_key(int index)
 	return saved_key[index];
 }
 
-static void * binary(char *ciphertext)
+static void * get_binary(char *ciphertext)
 {
 	static union {
 		char b[BINARY_SIZE];
@@ -245,12 +256,12 @@ struct fmt_main fmt_FGT = {
 		fgt_tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid,
 		fmt_default_split,
-		binary,
+		get_binary,
 		get_salt,
 #if FMT_MAIN_VERSION > 11
 		{ NULL },

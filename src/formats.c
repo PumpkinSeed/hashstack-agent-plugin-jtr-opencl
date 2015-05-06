@@ -12,7 +12,6 @@
 #include "dyna_salt.h"
 #include "misc.h"
 #include "unicode.h"
-#include "config.h"
 #ifndef BENCH_BUILD
 #include "options.h"
 #else
@@ -30,6 +29,7 @@ typedef unsigned int ARCH_WORD_32;
 #elif HAVE_CUDA
 #include "cuda_common.h"
 #endif
+#include "jumbo.h"
 #include "memdbg.h"
 
 struct fmt_main *fmt_list = NULL;
@@ -38,14 +38,7 @@ static struct fmt_main **fmt_tail = &fmt_list;
 extern volatile int bench_running;
 
 #ifndef BENCH_BUILD
-/* We could move this to misc.c */
-static size_t fmt_strnlen(const char *s, size_t max)
-{
-	const char *p=s;
-	while(*p && max--)
-		++p;
-	return(p - s);
-}
+static int orig_min, orig_max, orig_len;
 #endif
 
 void fmt_register(struct fmt_main *format)
@@ -58,55 +51,39 @@ void fmt_register(struct fmt_main *format)
 
 void fmt_init(struct fmt_main *format)
 {
-	char *opt;
 	if (!format->private.initialized) {
-		double d = 0;
-
-		if (!(opt = getenv("OMP_SCALE")))
-			opt = cfg_get_param(SECTION_OPTIONS, NULL,
-			                    "FormatBlockScaleTuneMultiplier");
-		if (opt)
-			d = atof(opt);
-		if ((int)d > 1)
-			format->params.max_keys_per_crypt *= (int)d;
+#ifndef BENCH_BUILD
+		if (options.flags & FLG_LOOPTEST) {
+			orig_min = format->params.min_keys_per_crypt;
+			orig_max = format->params.max_keys_per_crypt;
+			orig_len = format->params.plaintext_length;
+		}
+#endif
 		format->methods.init(format);
 		format->private.initialized = 1;
-		if (d > 0 && d < 1.0) {
-			double tmpd = format->params.max_keys_per_crypt;
-			tmpd *= d;
-			tmpd += .01;
-			if (tmpd < 1) tmpd = 1.01;
-			format->params.max_keys_per_crypt = tmpd;
-		}
 	}
 #ifndef BENCH_BUILD
 	if (options.flags & FLG_KEEP_GUESSING)
 		format->params.flags |= FMT_NOT_EXACT;
 
 	if (options.force_maxkeys) {
-		if (options.force_maxkeys <= format->params.max_keys_per_crypt)
-			format->params.min_keys_per_crypt =
-				format->params.max_keys_per_crypt =
-				options.force_maxkeys;
-		else {
+		if (options.force_maxkeys > format->params.max_keys_per_crypt) {
 			fprintf(stderr,
 			    "Can't set mkpc larger than %u for %s format\n",
 			    format->params.max_keys_per_crypt,
 			    format->params.label);
 			error();
 		}
+		if (options.force_maxkeys < format->params.min_keys_per_crypt)
+			format->params.min_keys_per_crypt =
+				options.force_maxkeys;
 	}
-	if (options.force_maxlength) {
-		if (options.force_maxlength <= format->params.plaintext_length)
-			format->params.plaintext_length =
-				options.force_maxlength;
-		else {
-			fprintf(stderr, "Can't set max length larger than %u "
-			        "for %s format\n",
-			        format->params.plaintext_length,
-			        format->params.label);
-			error();
-		}
+	if (options.force_maxlength > format->params.plaintext_length) {
+		fprintf(stderr, "Can't set max length larger than %u "
+		        "for %s format\n",
+		        format->params.plaintext_length,
+		        format->params.label);
+		error();
 	}
 #endif
 }
@@ -119,7 +96,31 @@ void fmt_done(struct fmt_main *format)
 #ifdef HAVE_OPENCL
 		opencl_done();
 #endif
+#ifndef BENCH_BUILD
+		if (options.flags & FLG_LOOPTEST) {
+			format->params.min_keys_per_crypt = orig_min;
+			format->params.max_keys_per_crypt = orig_max;
+			format->params.plaintext_length = orig_len;
+		}
+#endif
+
 	}
+}
+
+void fmt_all_done(void)
+{
+	struct fmt_main *format = fmt_list;
+
+	while (format) {
+		if (format->private.initialized) {
+			format->methods.done();
+			format->private.initialized = 0;
+		}
+		format = format->next;
+	}
+#ifdef HAVE_OPENCL
+	opencl_done();
+#endif
 }
 
 static int is_poweroftwo(size_t align)
@@ -137,17 +138,28 @@ static int is_aligned(void *p, size_t align)
 #define fmt_set_key(key, index)	  \
 	{ \
 		static char buf_key[PLAINTEXT_BUFFER_SIZE]; \
-		strncpy(buf_key, key, sizeof(buf_key)); \
+		char *s = key, *d = buf_key; \
+		while ((*d++ = *s++)); \
 		format->methods.set_key(buf_key, index); \
 	}
 
 #define MAXLABEL        "MAXLENGTH" /* must be upper-case ASCII chars only */
-static char *longcand(int index, int ml)
+#define MAXLABEL_SIMD   "0X80_IS_NOT_EOW\x80" /* Catch a common bug */
+static char *longcand(struct fmt_main *format, int index, int ml)
 {
 	static char out[PLAINTEXT_BUFFER_SIZE];
 
 	memset(out, 'A' + (index % 23), ml);
-	memcpy(out, MAXLABEL, strlen(MAXLABEL));
+	if (!(format->params.flags & FMT_8_BIT) ||
+#ifndef BENCH_BUILD
+	    !(format->params.flags & FMT_CASE) || pers_opts.target_enc == UTF_8
+#else
+	    !(format->params.flags & FMT_CASE)
+#endif
+	   )
+		memcpy(out, MAXLABEL, strlen(MAXLABEL));
+	else
+		memcpy(out, MAXLABEL_SIMD, strlen(MAXLABEL_SIMD));
 	out[ml] = 0;
 
 	return out;
@@ -308,7 +320,8 @@ static char *fmt_self_test_body(struct fmt_main *format,
 		if (!current->fields[1])
 			current->fields[1] = current->ciphertext;
 		ciphertext = format->methods.prepare(current->fields, format);
-		if (!ciphertext || strlen(ciphertext) < 7)
+		if (!ciphertext || (strcmp(format->params.label, "plaintext") &&
+		                    strlen(ciphertext) < 7))
 			return "prepare";
 		if (format->methods.valid(ciphertext, format) != 1) {
 			snprintf(s_size, sizeof(s_size), "valid (%s)", ciphertext);
@@ -316,8 +329,10 @@ static char *fmt_self_test_body(struct fmt_main *format,
 		}
 
 #if !defined(BENCH_BUILD)
-		if (extra_tests && !dhirutest++ && strcmp(format->params.label, "dummy")
-		    && strcmp(format->params.label, "crypt")) {
+		if (extra_tests && !dhirutest++ &&
+		    strcmp(format->params.label, "plaintext") &&
+		    strcmp(format->params.label, "dummy") &&
+		    strcmp(format->params.label, "crypt")) {
 			if (*ciphertext == '$') {
 				char *p, *k = strdup(ciphertext);
 
@@ -407,8 +422,8 @@ static char *fmt_self_test_body(struct fmt_main *format,
 		}
 
 		/* validate that salt dupe checks will work */
-		if (!salt_dupe_warned) {
-			char *copy = malloc(format->params.salt_size);
+		if (!salt_dupe_warned && format->params.salt_size) {
+			char *copy = mem_alloc(format->params.salt_size);
 
 			memcpy(copy, salt, format->params.salt_size);
 			salt = format->methods.salt(ciphertext);
@@ -496,7 +511,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 			   1. Fill the buffer with maximum length keys */
 			format->methods.clear_keys();
 			for (i = 0; i < max; i++) {
-				char *pCand = longcand(i, ml);
+				char *pCand = longcand(format, i, ml);
 				format->methods.set_key(pCand, i);
 			}
 
@@ -513,10 +528,10 @@ static char *fmt_self_test_body(struct fmt_main *format,
 			/* 3. Now read them back and verify they are intact */
 			for (i = 0; i < max; i++) {
 				char *getkey = format->methods.get_key(i);
-				char *setkey = longcand(i, ml);
+				char *setkey = longcand(format, i, ml);
 
 				if (strncmp(getkey, setkey, ml + 1)) {
-					if (fmt_strnlen(getkey, ml + 1) > ml)
+					if (strnlen(getkey, ml + 1) > ml)
 					sprintf(s_size, "max. length in index "
 					        "%d: wrote %d, got longer back",
 					        i, ml);
@@ -606,7 +621,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 /* Always call set_key() even if skipping. Some formats depend on it. */
 			for (i = index + 1;
 			     i < max && i < (index + (index >> 1)); i++)
-				format->methods.set_key(longcand(i, ml), i);
+				format->methods.set_key(longcand(format, i, ml), i);
 			index = i;
 		} else
 			index++;
@@ -627,7 +642,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 			if (strstr(format->params.label, "-opencl") ||
 			    strstr(format->params.label, "-cuda")) {
 				for (i = index + 1; i < max - 1; i++)
-				    format->methods.set_key(longcand(i, ml), i);
+				    format->methods.set_key(longcand(format, i, ml), i);
 				index = max - 1;
 			} else
 #endif

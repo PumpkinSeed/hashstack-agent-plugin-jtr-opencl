@@ -1,11 +1,11 @@
 /*
- * Developed by Claudio André <claudio.andre at correios.net.br> in 2012
+ * Developed by Claudio André <claudioandre.br at gmail.com> in 2012
  * Based on source code provided by Samuele Giovanni Tonon
  *
  * More information at http://openwall.info/wiki/john/OpenCL-SHA-256
  *
  * Copyright (c) 2011 Samuele Giovanni Tonon <samu at linuxasylum dot net>
- * Copyright (c) 2012 Claudio André <claudio.andre at correios.net.br>
+ * Copyright (c) 2012-2015 Claudio André <claudioandre.br at gmail.com>
  * This program comes with ABSOLUTELY NO WARRANTY; express or implied .
  * This is free software, and you are welcome to redistribute it
  * under certain conditions; as expressed here
@@ -49,6 +49,7 @@ static cl_mem pass_buffer;		//Plaintext buffer.
 static cl_mem hash_buffer;		//Hash keys (output).
 static cl_mem work_buffer;		//Temporary buffer
 static cl_mem pinned_saved_keys, pinned_partial_hashes;
+static struct fmt_main *self;
 
 static cl_kernel prepare_kernel, final_kernel;
 
@@ -268,6 +269,7 @@ static char * get_key(int index) {
 /* ------- Initialization  ------- */
 static void build_kernel(char * task) {
 	char *custom_opts;
+	int major, minor;
 
 	if (!(custom_opts = getenv(OCL_CONFIG "_BuildOpts")))
 		custom_opts = cfg_get_param(SECTION_OPTIONS,
@@ -275,7 +277,13 @@ static void build_kernel(char * task) {
 		                            OCL_CONFIG "_BuildOpts");
 
 	opencl_build_kernel(task, gpu_id, custom_opts, 1);
+	opencl_driver_value(gpu_id, &major, &minor);
 
+	if (major == 1311 && minor == 2) {
+		fprintf(stderr,
+			"The OpenCL driver in use cannot run this kernel. Please, update your driver!\n");
+		error();
+	}
 	// create kernel(s) to execute
 	crypt_kernel = clCreateKernel(program[gpu_id], "kernel_crypt", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
@@ -288,9 +296,11 @@ static void build_kernel(char * task) {
 	}
 }
 
-static void init(struct fmt_main * self) {
+static void init(struct fmt_main *_self) {
 	char * tmp_value;
 	char * task = "$JOHN/kernels/cryptsha256_kernel_DEFAULT.cl";
+
+	self = _self;
 
 	opencl_prepare_dev(gpu_id);
 	source_in_use = device_info[gpu_id];
@@ -303,20 +313,28 @@ static void init(struct fmt_main * self) {
 
 	build_kernel(task);
 
-	//Initialize openCL tuning (library) for this format.
-	opencl_init_auto_setup(SEED, HASH_LOOPS,
-		((_SPLIT_KERNEL_IN_USE) ? split_events : NULL),
-		warn, 1, self, create_clobj, release_clobj,
-		sizeof(sha256_password), 0);
-
 	if (source_in_use != device_info[gpu_id])
-		fprintf(stderr, "Selected runtime id %d, source (%s)\n", source_in_use, task);
+		fprintf(stderr, "Selected runtime id %d, source (%s)\n",
+		        source_in_use, task);
+}
 
-	//Auto tune execution from shared/included code.
-	self->methods.crypt_all = crypt_all_benchmark;
-	autotune_run(self, ROUNDS_DEFAULT, 0,
-		(cpu(device_info[gpu_id]) ? 2000000000ULL : 4000000000ULL));
-	self->methods.crypt_all = crypt_all;
+static void reset(struct db_main *db)
+{
+	if (!db) {
+		//Initialize openCL tuning (library) for this format.
+		opencl_init_auto_setup(SEED, HASH_LOOPS,
+		                       ((_SPLIT_KERNEL_IN_USE) ?
+		                        split_events : NULL), warn, 1,
+		                       self, create_clobj, release_clobj,
+		                       sizeof(sha256_password), 0);
+
+		//Auto tune execution from shared/included code.
+		self->methods.crypt_all = crypt_all_benchmark;
+		autotune_run(self, ROUNDS_DEFAULT, 0,
+		             (cpu(device_info[gpu_id]) ?
+		              2000000000ULL : 4000000000ULL));
+		self->methods.crypt_all = crypt_all;
+	}
 }
 
 static void done(void) {
@@ -342,7 +360,8 @@ static int cmp_all(void * binary, int count) {
 	return 0;
 }
 
-static int cmp_one(void * binary, int index) {
+static int cmp_one(void * binary, int index)
+{
 	return !memcmp(binary, (void *) &calculated_hash[index], BINARY_SIZE);
 }
 
@@ -400,7 +419,7 @@ static int crypt_all_benchmark(int *pcount, struct db_salt *_salt)
 
 static int crypt_all(int *pcount, struct db_salt *_salt)
 {
-	int count = *pcount;
+	const int count = *pcount;
 	int i;
 	size_t gws;
 
@@ -481,26 +500,22 @@ struct fmt_main fmt_opencl_cryptsha256 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		tests
 	}, {
 		init,
 		done,
-		fmt_default_reset,
+		reset,
 		fmt_default_prepare,
 		valid,
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

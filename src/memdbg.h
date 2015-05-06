@@ -92,6 +92,8 @@ extern void		MemDbg_Validate_msg2(int level, const char *pMsg, int bShowExData);
  * at almost all costs, and performance will usually go up.
  */
 extern void *MEMDBG_alloc(size_t, char *, int);
+extern void *MEMDBG_alloc_align(size_t, int, char *, int);
+extern void *MEMDBG_calloc(size_t count, size_t, char *, int);
 extern void *MEMDBG_realloc(const void *, size_t, char *, int);
 extern void MEMDBG_free(const void *, char *, int);
 extern char *MEMDBG_strdup(const char *, char *, int);
@@ -107,15 +109,15 @@ extern char *MEMDBG_strdup(const char *, char *, int);
 #undef libc_malloc
 #define libc_free(a)    do {if(a) MEMDBG_libc_free(a); a=0; } while(0)
 #define libc_malloc(a)   MEMDBG_libc_alloc(a)
-#define libc_calloc(a)   MEMDBG_libc_calloc(a)
+#define libc_calloc(a,b) MEMDBG_libc_calloc(a,b)
 #define malloc(a)     MEMDBG_alloc((a),__FILE__,__LINE__)
-#define calloc(a)     MEMDBG_calloc((a),__FILE__,__LINE__)
+#define calloc(a,b)   MEMDBG_calloc(a,b,__FILE__,__LINE__)
 #define realloc(a,b)  MEMDBG_realloc((a),(b),__FILE__,__LINE__)
 /* this code mimicks JtR's FREE_MEM(a) but does it for any MEMDBG_free(a,F,L) call (a hooked free(a) call) */
 #define free(a)       do { if (a) MEMDBG_free((a),__FILE__,__LINE__); a=0; } while(0)
 #define strdup(a)     MEMDBG_strdup((a),__FILE__,__LINE__)
 
-#endif
+#endif /* !defined __MEMDBG__ */
 
 /* pass the file handle to write to (normally stderr) */
 #define MEMDBG_PROGRAM_EXIT_CHECKS(a) do { \
@@ -167,7 +169,11 @@ void MEMDBG_checkSnapshot_possible_exit_on_error(MEMDBG_HANDLE, int exit_on_any_
 
 void MEMDBG_tag_mem_from_alloc_tiny(void *);
 
-#else
+extern void MEMDBG_libc_free(void *);
+extern void *MEMDBG_libc_alloc(size_t size);
+extern void *MEMDBG_libc_calloc(size_t count, size_t size);
+
+#elif 0
 /* NOTE, we DO keep one special function here.  We make free a little
  * smarter. this function gets used, even when we do NOT compile with
  * any memory debugging on. This makes free work more like C++ delete,
@@ -182,13 +188,22 @@ void MEMDBG_tag_mem_from_alloc_tiny(void *);
 #undef libc_malloc
 #define libc_free(a)  do {if(a) MEMDBG_libc_free(a); a=0; } while(0)
 #define libc_malloc(a)   MEMDBG_libc_alloc(a)
-#define libc_calloc(a)   MEMDBG_libc_calloc(a)
+#define libc_calloc(a,b) MEMDBG_libc_calloc(a,b)
 
 #if !defined(__MEMDBG__)
 /* this code mimicks JtR's FREE_MEM(a) but does it for any normal free(a) call */
+#if !defined _MSC_VER
 extern void MEMDBG_off_free(void *a);
 #define free(a)   do { if(a) MEMDBG_off_free(a); a=0; } while(0)
 #endif
+#endif /* !defined(__MEMDBG__) */
+
+#else
+
+#define libc_alloc alloc
+#define libc_calloc calloc
+#define libc_free free
+
 #define MemDbg_Used(a) 0
 #define MemDbg_Display(a)
 #define MemDbg_Validate(a)
@@ -203,9 +218,5 @@ extern void MEMDBG_off_free(void *a);
 #define MEMDBG_checkSnapshot_possible_exit_on_error(a, b) if(a) printf(" \b")
 
 #endif /* MEMDBG_ON */
-
-extern void MEMDBG_libc_free(void *);
-extern void *MEMDBG_libc_alloc(size_t size);
-extern void *MEMDBG_libc_calloc(size_t size);
 
 #endif /* __MEMDBG_H_ */

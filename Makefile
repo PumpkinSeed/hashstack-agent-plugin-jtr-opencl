@@ -1,11 +1,10 @@
-CC        = cc
 
 all:
 	cd src && \
 	./configure --disable-cuda --disable-pcap --disable-openmp && \
-	make
-	find run/ -type l -exec rm -vf '{}' \; ; \
-	find run/ -type f -perm 0775 ! -name john -exec rm -vf '{}' \;
+	make -j
+	find run/ -type l -exec rm -vf '{}' \;
+	find run/ -type f -executable ! -name john -exec rm -vf '{}' \;
 
 install:
 	mkdir -p $(DESTDIR)/opt/hashstack/programs/JohnTheRipper/

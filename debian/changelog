@@ -1,3 +1,9 @@
+hashstack-agent-plugin-jtr-opencl (1.8.0.4-jumbo-1-bleeding-0sagitta1) precise; urgency=low
+
+  * update source, add new formats 
+
+ -- epixoip <epixoip@token>  Tue, 05 May 2015 19:16:23 -0700
+
 hashstack-agent-plugin-jtr-opencl (1.8.0.2-jumbo-1-bleeding-0sagitta1) precise; urgency=low
 
   * Initial release 

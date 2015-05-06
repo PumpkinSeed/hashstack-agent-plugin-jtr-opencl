@@ -5,6 +5,11 @@
  * Converted to thin format, into $dynamic_20$ format.
  */
 
+#if AC_BUILT
+#include "autoconfig.h"
+#endif
+#ifndef DYNAMIC_DISABLED
+
 #if FMT_EXTERNS_H
 extern struct fmt_main fmt_asaMD5;
 #elif FMT_REGISTERS_H
@@ -24,7 +29,8 @@ john_register_one(&fmt_asaMD5);
 #define BENCHMARK_COMMENT       ""
 #define BENCHMARK_LENGTH        0
 
-#define PLAINTEXT_LENGTH        32
+// set PLAINTEXT_LENGTH to 0, so dyna will set this
+#define PLAINTEXT_LENGTH        0
 #define CIPHERTEXT_LENGTH       21
 #define BINARY_SIZE             16
 #define BINARY_ALIGN            MEM_ALIGN_WORD
@@ -140,11 +146,9 @@ static void link_funcs() {
 
 static void init(struct fmt_main *self)
 {
-	get_ptr();
 	if (self->private.initialized == 0) {
-		pDynamic_20 = dynamic_THIN_FORMAT_LINK(&fmt_asaMD5, Convert(Conv_Buf, tests[0].ciphertext), "asa-md5", 1);
-		link_funcs();
-		fmt_asaMD5.params.algorithm_name = pDynamic_20->params.algorithm_name;
+		get_ptr();
+		pDynamic_20->methods.init(pDynamic_20);
 		self->private.initialized = 1;
 	}
 }
@@ -157,3 +161,5 @@ static void get_ptr() {
 }
 
 #endif /* plugin stanza */
+
+#endif /* DYNAMIC_DISABLED */

@@ -17,7 +17,6 @@
  */
 
 #if AC_BUILT
-/* need to know if HAVE_LIBDL is set, for autoconfig build */
 #include "autoconfig.h"
 #else
 #ifdef __SIZEOF_INT128__
@@ -101,7 +100,6 @@ static int john_omp_threads_new;
 #include "regex.h"
 
 #include "unicode.h"
-#include "plugin.h"
 #if HAVE_OPENCL
 #include "common-opencl.h"
 #endif
@@ -141,6 +139,7 @@ extern struct fmt_main fmt_crypt;
 #endif
 extern struct fmt_main fmt_trip;
 extern struct fmt_main fmt_dummy;
+extern struct fmt_main fmt_NT;
 
 #include "fmt_externs.h"
 
@@ -217,6 +216,16 @@ static void john_register_one(struct fmt_main *format)
 		else if (!strcasecmp(options.format, "dynamic")) {
 			if ( (format->params.flags & FMT_DYNAMIC) == 0) return;
 		}
+		else if (!strcasecmp(options.format, "avx")) {
+			if (!strstr(format->params.algorithm_name, "AVX")) return;
+		}
+		else if (!strcasecmp(options.format, "avx2")) {
+			if (!strstr(format->params.algorithm_name, "AVX2")) return;
+		}
+		else if (!strcasecmp(options.format, "avx512")) {
+			if (!strstr(format->params.algorithm_name, "AVX512")
+			    && (!strstr(format->params.algorithm_name, "MIC"))) return;
+		}
 		else if (!strcasecmp(options.format, "cpu")) {
 			if (strstr(format->params.label, "-opencl") ||
 			    strstr(format->params.label, "-cuda")) return;
@@ -261,16 +270,12 @@ static void john_register_one(struct fmt_main *format)
 
 static void john_register_all(void)
 {
+#ifndef DYNAMIC_DISABLED
 	int i, cnt;
 	struct fmt_main *selfs;
+#endif
 
 	if (options.format) strlwr(options.format);
-
-	// NOTE, this MUST happen, before ANY format that links a 'thin' format
-	// to dynamic.
-	// Since gen(27) and gen(28) are MD5 and MD5a formats, we build the
-	// generic format first
-	cnt = dynamic_Register_formats(&selfs);
 
 	john_register_one(&fmt_DES);
 	john_register_one(&fmt_BSDI);
@@ -282,10 +287,21 @@ static void john_register_all(void)
 	john_register_one(&fmt_trip);
 	john_register_one(&fmt_dummy);
 
+#ifndef DYNAMIC_DISABLED
+	// NOTE, this MUST happen, before ANY format that links a 'thin' format
+	// to dynamic.
+	// Since gen(27) and gen(28) are MD5 and MD5a formats, we build the
+	// generic format first
+	cnt = dynamic_Register_formats(&selfs);
+
 	for (i = 0; i < cnt; ++i)
 		john_register_one(&(selfs[i]));
+#endif
 
 #include "fmt_registers.h"
+
+	// This format is deprecated so now registers after plug-in NT format.
+	john_register_one(&fmt_NT);
 
 #if HAVE_CUDA
 	john_register_one(&fmt_cuda_rawsha224);
@@ -294,13 +310,6 @@ static void john_register_all(void)
 
 #if HAVE_CRYPT
 	john_register_one(&fmt_crypt);
-#endif
-
-#if HAVE_LIBDL
-	if (options.fmt_dlls)
-	register_dlls ( options.fmt_dlls,
-		cfg_get_param(SECTION_OPTIONS, NULL, "plugin"),
-		john_register_one );
 #endif
 
 	if (!fmt_list) {
@@ -618,7 +627,8 @@ static void john_wait(void)
 	log_flush();
 
 	/* Tell our friends there is nothing more to crack! */
-	if (!database.password_count && !options.reload_at_crack)
+	if (!database.password_count && !options.reload_at_crack &&
+	    cfg_get_bool(SECTION_OPTIONS, NULL, "ReloadAtDone", 0))
 		raise(SIGUSR2);
 
 /*
@@ -755,6 +765,7 @@ static void john_load_conf(void)
 	}
 
 	options.secure = cfg_get_bool(SECTION_OPTIONS, NULL, "SecureMode", 0);
+	options.show_uid_on_crack = cfg_get_bool(SECTION_OPTIONS, NULL, "ShowUIDinCracks", 0);
 	options.reload_at_crack =
 		cfg_get_bool(SECTION_OPTIONS, NULL, "ReloadAtCrack", 1);
 	options.reload_at_save =
@@ -838,38 +849,24 @@ static void john_load_conf_db(void)
 		pers_opts.store_utf8 = cfg_get_bool(SECTION_OPTIONS,
 		                                  NULL, "CPstoreUTF8", 0);
 
-	if (!options.secure) {
-		if (pers_opts.report_utf8 && options.loader.log_passwords)
-			log_event("- Passwords in this logfile are "
-			          "UTF-8 encoded");
-
-		if (pers_opts.store_utf8)
-			log_event("- Passwords will be stored UTF-8 "
-			          "encoded in .pot file");
-	}
-
 	if (pers_opts.target_enc != pers_opts.input_enc &&
 	    pers_opts.input_enc != UTF_8) {
 		if (john_main_process)
 			fprintf(stderr, "Target encoding can only be specified"
 			        " if input encoding is UTF-8\n");
-		exit(0);
+		error();
 	}
 
-	if (!(options.flags & FLG_SHOW_CHK) && !options.loader.showuncracked)
-	if (options.flags & (FLG_PASSWD | FLG_STDIN_CHK))
-	if (pers_opts.default_enc && john_main_process &&
-	    pers_opts.input_enc != ASCII)
-		fprintf(stderr, "Using default input encoding: %s\n",
-		        cp_id2name(pers_opts.input_enc));
+	if (john_main_process)
+	if (!(options.flags & FLG_SHOW_CHK) && !options.loader.showuncracked) {
+		if (options.flags & (FLG_PASSWD | FLG_STDIN_CHK))
+		if (pers_opts.default_enc && pers_opts.input_enc != ASCII)
+			fprintf(stderr, "Using default input encoding: %s\n",
+			        cp_id2name(pers_opts.input_enc));
 
-	if (!(options.flags & FLG_SHOW_CHK) && !options.loader.showuncracked)
-	if (pers_opts.target_enc != pers_opts.input_enc &&
-	    (!database.format ||
-	     !(database.format->params.flags & FMT_UNICODE))) {
-		log_event("- Target encoding: %s",
-		          cp_id2name(pers_opts.target_enc));
-		if (john_main_process) {
+		if (pers_opts.target_enc != pers_opts.input_enc &&
+		    (!database.format ||
+		     !(database.format->params.flags & FMT_UNICODE))) {
 			if (pers_opts.default_target_enc)
 				fprintf(stderr, "Using default target "
 				        "encoding: %s\n",
@@ -878,17 +875,27 @@ static void john_load_conf_db(void)
 				fprintf(stderr, "Target encoding: %s\n",
 				        cp_id2name(pers_opts.target_enc));
 		}
-	}
 
-	if (!(options.flags & FLG_SHOW_CHK) && !options.loader.showuncracked)
-	if (pers_opts.input_enc != pers_opts.internal_enc) {
-		log_event("- Rules/masks using %s",
-		          cp_id2name(pers_opts.internal_enc));
-		if (john_main_process &&
+		if (pers_opts.input_enc != pers_opts.internal_enc)
+		if (database.format &&
 		    (database.format->params.flags & FMT_UNICODE))
 			fprintf(stderr, "Rules/masks using %s\n",
 			        cp_id2name(pers_opts.internal_enc));
 	}
+}
+
+static void db_main_free(struct db_main *db)
+{
+	if (db->format &&
+		(db->format->params.flags & FMT_DYNA_SALT) == FMT_DYNA_SALT) {
+		struct db_salt *psalt = db->salts;
+		while (psalt) {
+			dyna_salt_remove(psalt->salt);
+			psalt = psalt->next;
+		}
+	}
+	MEM_FREE(db->salt_hash);
+	MEM_FREE(db->cracked_hash);
 }
 
 static void john_load(void)
@@ -966,6 +973,8 @@ static void john_load(void)
 				database.guess_count != 1 ? "es" : "",
 				database.password_count -
 				database.guess_count);
+
+			fmt_all_done();
 
 			return;
 		}
@@ -1106,6 +1115,7 @@ static void john_load(void)
 		options.loader.flags &= ~DB_CRACKED;
 		pers_opts.activepot = save_pot;
 		fmt_list = save_list;
+		db_main_free(&loop_db);
 	}
 
 #ifdef _OPENMP
@@ -1148,10 +1158,10 @@ static void john_load(void)
 			log_flush();
 			john_fork();
 		}
+#endif
 #if HAVE_MPI
 		if (mpi_p > 1)
 			john_set_mpi();
-#endif
 #endif
 	}
 }
@@ -1264,7 +1274,7 @@ static void john_init(char *name, int argc, char **argv)
 			if (john_main_process)
 			fprintf(stderr, "Internal encoding can only be "
 			        "specified if input encoding is UTF-8\n");
-			exit(0);
+			error();
 		}
 	}
 
@@ -1287,9 +1297,34 @@ static void john_init(char *name, int argc, char **argv)
 #if defined(HAVE_CUDA) || defined(HAVE_OPENCL)
 	gpu_log_temp();
 #endif
+
 	if (pers_opts.target_enc != ASCII)
 		log_event("- %s input encoding enabled",
 		          cp_id2name(pers_opts.input_enc));
+
+	if (!options.secure) {
+		if (pers_opts.report_utf8 && options.loader.log_passwords)
+			log_event("- Passwords in this logfile are "
+			          "UTF-8 encoded");
+
+		if (pers_opts.store_utf8)
+			log_event("- Passwords will be stored UTF-8 "
+			          "encoded in .pot file");
+	}
+
+	if (!(options.flags & FLG_SHOW_CHK) && !options.loader.showuncracked)
+	if (pers_opts.target_enc != pers_opts.input_enc &&
+	    (!database.format ||
+	     !(database.format->params.flags & FMT_UNICODE))) {
+		log_event("- Target encoding: %s",
+		          cp_id2name(pers_opts.target_enc));
+	}
+
+	if (!(options.flags & FLG_SHOW_CHK) && !options.loader.showuncracked)
+	if (pers_opts.input_enc != pers_opts.internal_enc) {
+		log_event("- Rules/masks using %s",
+		          cp_id2name(pers_opts.internal_enc));
+	}
 }
 
 static void john_run(void)
@@ -1340,7 +1375,7 @@ static void john_run(void)
 		}
 		tty_init(options.flags & FLG_STDIN_CHK);
 
-		if (database.format->params.flags & FMT_NOT_EXACT)
+		if (john_main_process && database.format->params.flags & FMT_NOT_EXACT)
 			fprintf(stderr, "Note: This format may emit false "
 			        "positives, so it will keep trying even "
 			        "after\nfinding a possible candidate.\n");
@@ -1382,7 +1417,8 @@ static void john_run(void)
 #if HAVE_LIBGMP || HAVE_INT128 || HAVE___INT128 || HAVE___INT128_T
 		else
 		if (options.flags & FLG_PRINCE_CHK)
-			do_prince_crack(&database, options.wordlist);
+			do_prince_crack(&database, options.wordlist,
+			                (options.flags & FLG_RULES) != 0);
 #endif
 #if HAVE_REXGEN
 		else
@@ -1483,17 +1519,11 @@ static void john_done(void)
 
 	path_done();
 
-	/* this may not be the correct place to free this, it likely can be freed much earlier, but it works here */
-	if (database.format && (database.format->params.flags &  FMT_DYNA_SALT) == FMT_DYNA_SALT) {
-		struct db_salt *psalt = database.salts;
-		while (psalt) {
-			dyna_salt_remove(psalt->salt);
-			psalt = psalt->next;
-		}
-	}
-	MEM_FREE(database.salt_hash);
-	MEM_FREE(database.cracked_hash);
-
+/*
+ * This may not be the correct place to free this, it likely
+ * can be freed much earlier, but it works here
+ */
+	db_main_free(&database);
 	check_abort(0);
 	cleanup_tiny_memory();
 }

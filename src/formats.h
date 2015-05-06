@@ -66,8 +66,11 @@ struct db_salt;
  */
 #define FMT_UTF8			0x00000008
 /*
- * Format has false positive matches. Thus, do not remove hashes
- * when a likely PW is found
+ * Format has false positive matches. Thus, do not remove hashes when
+ * a likely PW is found.  This should only be set for formats where a
+ * false positive will actually not work IRL (eg. 7z),  as opposed to
+ * ones that has actual collisions (eg. oldoffice).  The latter group
+ * of formats may instead be run with --keep-guessing if/when wanted.
  */
 #define FMT_NOT_EXACT			0x00000100
 /*
@@ -337,6 +340,11 @@ extern void fmt_init(struct fmt_main *format);
  * De-initializes this format if it was previously initialized.
  */
 extern void fmt_done(struct fmt_main *format);
+
+/*
+ * De-initializes all initialized formats.
+ */
+extern void fmt_all_done(void);
 
 /*
  * Tests the format's methods for correct operation. Returns NULL on

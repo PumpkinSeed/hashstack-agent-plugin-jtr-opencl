@@ -51,7 +51,7 @@ john_register_one(&fmt_pkzip);
 #define BINARY_ALIGN			1
 
 #define SALT_SIZE			(sizeof(PKZ_SALT*))
-#define SALT_ALIGN			(sizeof(PKZ_SALT*))
+#define SALT_ALIGN			(sizeof(ARCH_WORD_32))
 
 #define MIN_KEYS_PER_CRYPT		1
 #define MAX_KEYS_PER_CRYPT		64
@@ -384,7 +384,7 @@ static void init(struct fmt_main *self)
 	 */
 #ifdef PKZIP_USE_MULT_TABLE
 	for (n = 0; n < 16384; n++)
-		mult_tab[n] = ((n*4+3) * (n*4+2) >> 8) & 0xff;
+		mult_tab[n] = (((unsigned)(n*4+3) * (n*4+2)) >> 8) & 0xff;
 #endif
 
 #if USE_PKZIP_MAGIC
@@ -506,7 +506,7 @@ static void *get_salt(char *ciphertext)
 	int type2 = 0;
 
 	/* Needs word align on REQ_ALIGN systems.  May crash otherwise (in the sscanf) */
-	salt = mem_calloc(sizeof(PKZ_SALT));
+	salt = mem_calloc(1, sizeof(PKZ_SALT));
 
 	cp = cpalloc;
 	strcpy((c8*)cp, ciphertext);
@@ -656,15 +656,17 @@ static void *get_salt(char *ciphertext)
 			salt->H[i].magic = 0;	// remove any 'magic' logic from this hash.
 	}
 
-	psalt = mem_calloc(sizeof(PKZ_SALT) + ex_len[0]+ex_len[1]+ex_len[2]+2);
+	psalt = mem_calloc(1, sizeof(PKZ_SALT) + ex_len[0]+ex_len[1]+ex_len[2]+2);
 	memcpy(psalt, salt, sizeof(*salt));
-	MEM_FREE(salt);
 	memcpy(psalt->zip_data, H[0], ex_len[0]);
 	MEM_FREE(H[0]);
-	memcpy(psalt->zip_data+ex_len[0]+1, H[1], ex_len[1]);
+	if(salt->cnt > 1)
+		memcpy(psalt->zip_data+ex_len[0]+1, H[1], ex_len[1]);
 	MEM_FREE(H[1]);
-	memcpy(psalt->zip_data+ex_len[0]+ex_len[1]+2, H[2], ex_len[2]);
+	if(salt->cnt > 2)
+		memcpy(psalt->zip_data+ex_len[0]+ex_len[1]+2, H[2], ex_len[2]);
 	MEM_FREE(H[2]);
+	MEM_FREE(salt);
 
 	psalt->dsalt.salt_alloc_needs_free = 1;  // we used mem_calloc, so JtR CAN free our pointer when done with them.
 	// NOTE, we need some way to close the BIO and EVP crap!!
@@ -748,7 +750,8 @@ static int get_next_decrypted_block(u8 *in, int sizeof_n, FILE *fp, u32 *inp_use
  * this code is modifications made to the zpipe.c 'example' code from the zlib web site.
  */
 #define CHUNK (64*1024)
-static int cmp_exact_loadfile(int index) {
+static int cmp_exact_loadfile(int index)
+{
 
     int ret;
     u32 have, k;
@@ -1314,7 +1317,7 @@ MAYBE_INLINE static int check_inflate_CODE1(u8 *next, int left) {
  */
 static int crypt_all(int *pcount, struct db_salt *_salt)
 {
-	int _count = *pcount;
+	const int _count = *pcount;
 	int idx;
 #if (ZIP_DEBUG==2)
 	static int CNT, FAILED, FAILED2;

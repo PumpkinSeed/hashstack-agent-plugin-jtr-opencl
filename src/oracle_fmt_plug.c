@@ -250,7 +250,7 @@ static char *get_key(int index) {
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
-	int count = *pcount;
+	const int count = *pcount;
 	unsigned char buf[sizeof(cur_salt)];
 	unsigned int l;
 
@@ -276,7 +276,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	return count;
 }
 
-static void * binary(char *ciphertext)
+static void * get_binary(char *ciphertext)
 {
 	static unsigned char *out3;
 	int l;
@@ -341,11 +341,13 @@ static int get_hash_4(int index) { return crypt_key[0] & 0xfffff; }
 static int get_hash_5(int index) { return crypt_key[0] & 0xffffff; }
 static int get_hash_6(int index) { return crypt_key[0] & 0x7ffffff; }
 
-static int cmp_all(void *binary, int index) {
+static int cmp_all(void *binary, int count)
+{
 	return !memcmp(binary, crypt_key, sizeof(crypt_key));
 }
 
-static int cmp_exact(char *source, int count) {
+static int cmp_exact(char *source, int index)
+{
 	return 1;
 }
 
@@ -376,7 +378,7 @@ struct fmt_main fmt_oracle = {
 		prepare,
 		valid,
 		split,
-		binary,
+		get_binary,
 		get_salt,
 #if FMT_MAIN_VERSION > 11
 		{ NULL },

@@ -1,307 +1,481 @@
 {
     "algorithms": [
         {
-            "algorithm": "7zip",
-            "device": "cpu",
-            "mode": "7z",
-            "tasksize": 600
-        },
+            "algorithm": "7zip", 
+            "device": "gpu", 
+            "mode": "7z-opencl", 
+            "tasksize": 163800
+        }, 
         {
-            "algorithm": "Kerberos AFS",
-            "device": "cpu",
-            "mode": "AFS",
-            "tasksize": 19783680
-        },
+            "algorithm": "Kerberos AFS", 
+            "device": "cpu", 
+            "mode": "AFS", 
+            "tasksize": 123600000
+        }, 
         {
-            "algorithm": "Bitcoin-Qt Wallet",
-            "device": "cpu",
-            "mode": "Bitcoin",
-            "tasksize": 432
-        },
+            "algorithm": "Eggdrop", 
+            "device": "gpu", 
+            "mode": "bfegg", 
+            "tasksize": 2227560
+        }, 
         {
-            "algorithm": "Blackberry Enterprise Service 10",
-            "device": "cpu",
-            "mode": "blackberry-es10",
-            "tasksize": 991740
-        },
+            "algorithm": "Blackberry Enterprise Service 10", 
+            "device": "cpu", 
+            "mode": "blackberry-es10", 
+            "tasksize": 2339280
+        }, 
         {
-            "algorithm": "Blockchain.info Wallet",
-            "device": "gpu",
-            "mode": "blockchain-opencl",
-            "tasksize": 62580000
-        },
+            "algorithm": "Blockchain.info Wallet", 
+            "device": "gpu", 
+            "mode": "blockchain-opencl", 
+            "tasksize": 48395760
+        }, 
         {
-            "algorithm": "BSDi",
-            "device": "cpu",
-            "mode": "bsdicrypt",
-            "tasksize": 4976640
-        },
+            "algorithm": "BSDi", 
+            "device": "cpu", 
+            "mode": "bsdicrypt", 
+            "tasksize": 9984000
+        }, 
         {
-            "algorithm": "Clipperz Password Manager",
-            "device": "cpu",
-            "mode": "Clipperz",
-            "tasksize": 1289760
-        },
+            "algorithm": "Clipperz Password Manager", 
+            "device": "cpu", 
+            "mode": "Clipperz", 
+            "tasksize": 2596800
+        }, 
         {
-            "algorithm": "CRC32",
-            "device": "cpu",
-            "mode": "CRC32",
-            "tasksize": 2414340000
-        },
+            "algorithm": "Rational ClearQuest", 
+            "device": "cpu", 
+            "mode": "cq", 
+            "tasksize": 5983560000
+        }, 
         {
-            "algorithm": "Django (scrypt)",
-            "device": "cpu",
-            "mode": "django-scrypt",
-            "tasksize": 1128
-        },
+            "algorithm": "Dahua CCTV DVR", 
+            "device": "cpu", 
+            "mode": "dahua", 
+            "tasksize": 405000000
+        }, 
         {
-            "algorithm": "DIGEST-MD5 C/R",
-            "device": "cpu",
-            "mode": "dmd5",
-            "tasksize": 71400000
-        },
+            "algorithm": "Django (scrypt)", 
+            "device": "cpu", 
+            "mode": "django-scrypt", 
+            "tasksize": 2256
+        }, 
         {
-            "algorithm": "Apple DMG",
-            "device": "gpu",
-            "mode": "dmg-opencl",
-            "tasksize": 498000
-        },
+            "algorithm": "DIGEST-MD5 C/R", 
+            "device": "cpu", 
+            "mode": "dmd5", 
+            "tasksize": 138480000
+        }, 
         {
-            "algorithm": "eCryptfs",
-            "device": "cpu",
-            "mode": "eCryptfs",
-            "tasksize": 1512
-        },
+            "algorithm": "Apple DMG", 
+            "device": "gpu", 
+            "mode": "dmg-opencl", 
+            "tasksize": 21254880
+        }, 
         {
-            "algorithm": "Microsoft EFS",
-            "device": "cpu",
-            "mode": "EFS",
-            "tasksize": 8820
-        },
+            "algorithm": "eCryptfs", 
+            "device": "cpu", 
+            "mode": "eCryptfs", 
+            "tasksize": 3600
+        }, 
         {
-            "algorithm": "EncFS",
-            "device": "cpu",
-            "mode": "EncFS",
-            "tasksize": 1200
-        },
+            "algorithm": "Microsoft EFS", 
+            "device": "cpu", 
+            "mode": "EFS", 
+            "tasksize": 78840
+        }, 
         {
-            "algorithm": "GnuPG",
-            "device": "gpu",
-            "mode": "gpg-opencl",
-            "tasksize": 8810220
-        },
+            "algorithm": "EIGRP MD5", 
+            "device": "cpu", 
+            "mode": "eigrp", 
+            "tasksize": 325320000
+        }, 
         {
-            "algorithm": "KeePass",
-            "device": "cpu",
-            "mode": "KeePass",
-            "tasksize": 3606
-        },
+            "algorithm": "EIGRP HMAC-SHA256", 
+            "device": "cpu", 
+            "mode": "eigrp", 
+            "tasksize": 40665000
+        }, 
         {
-            "algorithm": "Mac OS X Keychain",
-            "device": "gpu",
-            "mode": "keychain-opencl",
-            "tasksize": 10633800
-        },
+            "algorithm": "EncFS", 
+            "device": "gpu", 
+            "mode": "encfs-opencl", 
+            "tasksize": 491520
+        }, 
         {
-            "algorithm": "GNOME Keyring",
-            "device": "cpu",
-            "mode": "keyring",
-            "tasksize": 42600
-        },
+            "algorithm": "GnuPG", 
+            "device": "gpu", 
+            "mode": "gpg-opencl", 
+            "tasksize": 31145760
+        }, 
         {
-            "algorithm": "Java KeyStore",
-            "device": "cpu",
-            "mode": "keystore",
-            "tasksize": 11227140
-        },
+            "algorithm": "HAVAL-128-4", 
+            "device": "cpu", 
+            "mode": "HAVAL-128-4", 
+            "tasksize": 228600000
+        }, 
         {
-            "algorithm": "Kerberos v4 TGT",
-            "device": "cpu",
-            "mode": "krb4",
-            "tasksize": 134460000
-        },
+            "algorithm": "HAVAL-256-3", 
+            "device": "cpu", 
+            "mode": "HAVAL-256-3", 
+            "tasksize": 329400000
+        }, 
         {
-            "algorithm": "Kerberos v5 TGT",
-            "device": "cpu",
-            "mode": "krb5",
-            "tasksize": 2619420
-        },
+            "algorithm": "HTTP Digest Authentication", 
+            "device": "cpu", 
+            "mode": "hdaa", 
+            "tasksize": 432720000
+        }, 
         {
-            "algorithm": "Kerberos 5 db etype 18",
-            "device": "cpu",
-            "mode": "krb5-18",
-            "tasksize": 6060
-        },
+            "algorithm": "KeePass", 
+            "device": "cpu", 
+            "mode": "KeePass", 
+            "tasksize": 7200
+        }, 
         {
-            "algorithm": "Kerberos 5 AS-REQ Pre-Auth etype 17/18",
-            "device": "cpu",
-            "mode": "krb5pa-sha1",
-            "tasksize": 44640
-        },
+            "algorithm": "Mac OS X Keychain", 
+            "device": "gpu", 
+            "mode": "keychain-opencl", 
+            "tasksize": 24480360
+        }, 
         {
-            "algorithm": "KDE KWallet",
-            "device": "cpu",
-            "mode": "kwallet",
-            "tasksize": 129000
-        },
+            "algorithm": "GNOME Keyring", 
+            "device": "gpu", 
+            "mode": "keyring-opencl", 
+            "tasksize": 29399280
+        }, 
         {
-            "algorithm": "LUKS",
-            "device": "cpu",
-            "mode": "LUKS",
-            "tasksize": 210
-        },
+            "algorithm": "Java KeyStore", 
+            "device": "cpu", 
+            "mode": "keystore", 
+            "tasksize": 22510920
+        }, 
         {
-            "algorithm": "MD2",
-            "device": "cpu",
-            "mode": "MD2",
-            "tasksize": 4626780
-        },
+            "algorithm": "OpenSSH known_hosts", 
+            "device": "cpu", 
+            "mode": "known_hosts", 
+            "tasksize": 263280000
+        }, 
         {
-            "algorithm": "MongoDB",
-            "device": "cpu",
-            "mode": "MongoDB",
-            "tasksize": 156480000
-        },
+            "algorithm": "Kerberos v4 TGT", 
+            "device": "cpu", 
+            "mode": "krb4", 
+            "tasksize": 23363640
+        }, 
         {
-            "algorithm": "Nuked-Klan CMS",
-            "device": "cpu",
-            "mode": "nk",
-            "tasksize": 89100000
-        },
+            "algorithm": "Kerberos v5 TGT", 
+            "device": "cpu", 
+            "mode": "krb5", 
+            "tasksize": 5175960
+        }, 
         {
-            "algorithm": "Oracle O5LOGON",
-            "device": "cpu",
-            "mode": "o5logon",
-            "tasksize": 162960000
-        },
+            "algorithm": "Kerberos 5 db etype 18", 
+            "device": "cpu", 
+            "mode": "krb5-18", 
+            "tasksize": 82560
+        }, 
         {
-            "algorithm": "Open Document Format",
-            "device": "gpu",
-            "mode": "ODF-opencl",
-            "tasksize": 953340
-        },
+            "algorithm": "Kerberos 5 AS-REQ Pre-Auth etype 17/18", 
+            "device": "cpu", 
+            "mode": "krb5pa-sha1", 
+            "tasksize": 76920
+        }, 
         {
-            "algorithm": "Adobe PDF",
-            "device": "cpu",
-            "mode": "PDF",
-            "tasksize": 2539320
-        },
+            "algorithm": "KDE KWallet", 
+            "device": "cpu", 
+            "mode": "kwallet", 
+            "tasksize": 251640
+        }, 
         {
-            "algorithm": "PKZIP",
-            "device": "cpu",
-            "mode": "PKZIP",
-            "tasksize": 301440000
-        },
+            "algorithm": "LastPass (sniffed session)", 
+            "device": "cpu", 
+            "mode": "lastpass", 
+            "tasksize": 601440
+        }, 
         {
-            "algorithm": "Post.Office",
-            "device": "cpu",
-            "mode": "po",
-            "tasksize": 162000000
-        },
+            "algorithm": "LUKS", 
+            "device": "cpu", 
+            "mode": "LUKS", 
+            "tasksize": 2352
+        }, 
         {
-            "algorithm": "Microsoft Outlook PST",
-            "device": "cpu",
-            "mode": "PST",
-            "tasksize": 2948340000
-        },
+            "algorithm": "MD2", 
+            "device": "cpu", 
+            "mode": "MD2", 
+            "tasksize": 9241800
+        }, 
         {
-            "algorithm": "PuTTY Private Key",
-            "device": "cpu",
-            "mode": "PuTTY",
-            "tasksize": 5479920
-        },
+            "algorithm": "MDC-2", 
+            "device": "cpu", 
+            "mode": "mdc2", 
+            "tasksize": 36504840
+        }, 
         {
-            "algorithm": "RAR 3.x",
-            "device": "gpu",
-            "mode": "rar-opencl",
-            "tasksize": 33600
-        },
+            "algorithm": "MongoDB", 
+            "device": "cpu", 
+            "mode": "MongoDB", 
+            "tasksize": 291360000
+        }, 
         {
-            "algorithm": "RAR 5.x",
-            "device": "cpu",
-            "mode": "RAR5",
-            "tasksize": 912
-        },
+            "algorithm": "Mozilla key3.db", 
+            "device": "cpu", 
+            "mode": "mozilla", 
+            "tasksize": 32139840
+        }, 
         {
-            "algorithm": "BLAKE2b",
-            "device": "cpu",
-            "mode": "Raw-Blake2",
-            "tasksize": 133080000
-        },
+            "algorithm": "MSCHAPv2 C/R", 
+            "device": "cpu", 
+            "mode": "MSCHAPv2", 
+            "tasksize": 3094320000
+        }, 
         {
-            "algorithm": "scrypt",
-            "device": "cpu",
-            "mode": "scrypt",
-            "tasksize": 1302
-        },
+            "algorithm": "Net MD5 (RIPv2, OSPF, BGP, SNMPv2)", 
+            "device": "cpu", 
+            "mode": "net-md5", 
+            "tasksize": 686520000
+        }, 
         {
-            "algorithm": "Siemens S7",
-            "device": "cpu",
-            "mode": "Siemens-S7",
-            "tasksize": 56249760
-        },
+            "algorithm": "Net SHA1 (BFD)", 
+            "device": "cpu", 
+            "mode": "net-sha1", 
+            "tasksize": 651960000
+        }, 
         {
-            "algorithm": "SIP",
-            "device": "cpu",
-            "mode": "SIP",
-            "tasksize": 91080000
-        },
+            "algorithm": "NetLM C/R (Half)", 
+            "device": "cpu", 
+            "mode": "nethalflm", 
+            "tasksize": 134520000
+        }, 
         {
-            "algorithm": "STRIP Password Manager",
-            "device": "gpu",
-            "mode": "strip-opencl",
-            "tasksize": 6442200
-        },
+            "algorithm": "NetLM C/R", 
+            "device": "cpu", 
+            "mode": "netlm", 
+            "tasksize": 92170560
+        }, 
         {
-            "algorithm": "StarOffice SXC",
-            "device": "gpu",
-            "mode": "sxc-opencl",
-            "tasksize": 1009920
-        },
+            "algorithm": "NetLMv2 C/R", 
+            "device": "cpu", 
+            "mode": "netlmv2", 
+            "tasksize": 81348840
+        }, 
         {
-            "algorithm": "TCP MD5 Signatures, BGP",
-            "device": "cpu",
-            "mode": "tcp-md5",
-            "tasksize": 192300000
-        },
+            "algorithm": "Nuked-Klan CMS", 
+            "device": "cpu", 
+            "mode": "nk", 
+            "tasksize": 178080000
+        }, 
         {
-            "algorithm": "VNC",
-            "device": "cpu",
-            "mode": "VNC",
-            "tasksize": 108240000
-        },
+            "algorithm": "Oracle O5LOGON", 
+            "device": "gpu", 
+            "mode": "o5logon-opencl", 
+            "tasksize": 793440000
+        }, 
         {
-            "algorithm": "ZIP",
-            "device": "gpu",
-            "mode": "zip-opencl",
-            "tasksize": 19353600
+            "algorithm": "Open Document Format", 
+            "device": "gpu", 
+            "mode": "ODF-opencl", 
+            "tasksize": 2195160
+        }, 
+        {
+            "algorithm": "OpenBSD Softraid", 
+            "device": "cpu", 
+            "mode": "OpenBSD-SoftRAID", 
+            "tasksize": 43680
+        }, 
+        {
+            "algorithm": "OpenVMS", 
+            "device": "cpu", 
+            "mode": "OpenVMS", 
+            "tasksize": 66759360
+        }, 
+        {
+            "algorithm": "Panama", 
+            "device": "cpu", 
+            "mode": "Panama", 
+            "tasksize": 51890280
+        }, 
+        {
+            "algorithm": "PBKDF2-HMAC-SHA1", 
+            "device": "gpu", 
+            "mode": "PBKDF2-HMAC-SHA1-opencl", 
+            "tasksize": 188640000
+        }, 
+        {
+            "algorithm": "Apple iOS 7+ .plist", 
+            "device": "gpu", 
+            "mode": "PBKDF2-HMAC-SHA1-opencl", 
+            "tasksize": 188640000
+        }, 
+        {
+            "algorithm": "PBKDF2-HMAC-SHA512", 
+            "device": "gpu", 
+            "mode": "pbkdf2-hmac-sha512-opencl", 
+            "tasksize": 869880
+        }, 
+        {
+            "algorithm": "PFX, PKCS12 (.pfx, .p12)", 
+            "device": "cpu", 
+            "mode": "PFX", 
+            "tasksize": 899160
+        }, 
+        {
+            "algorithm": "PKZIP", 
+            "device": "cpu", 
+            "mode": "PKZIP", 
+            "tasksize": 603000000
+        }, 
+        {
+            "algorithm": "Post.Office", 
+            "device": "cpu", 
+            "mode": "po", 
+            "tasksize": 310920000
+        }, 
+        {
+            "algorithm": "Microsoft Outlook PST", 
+            "device": "cpu", 
+            "mode": "PST", 
+            "tasksize": 5950320000
+        }, 
+        {
+            "algorithm": "PuTTY Private Key", 
+            "device": "cpu", 
+            "mode": "PuTTY", 
+            "tasksize": 14505240
+        }, 
+        {
+            "algorithm": "RAR 3.x", 
+            "device": "gpu", 
+            "mode": "rar-opencl", 
+            "tasksize": 1652160
+        }, 
+        {
+            "algorithm": "RAR 5.x", 
+            "device": "gpu", 
+            "mode": "RAR5-opencl", 
+            "tasksize": 2716440
+        }, 
+        {
+            "algorithm": "BLAKE2b", 
+            "device": "cpu", 
+            "mode": "Raw-Blake2", 
+            "tasksize": 258960000
+        }, 
+        {
+            "algorithm": "RipeMD128", 
+            "device": "cpu", 
+            "mode": "ripemd-128", 
+            "tasksize": 424680000
+        }, 
+        {
+            "algorithm": "sha1crypt", 
+            "device": "gpu", 
+            "mode": "sha1crypt-opencl", 
+            "tasksize": 4572240
+        }, 
+        {
+            "algorithm": "Siemens S7", 
+            "device": "cpu", 
+            "mode": "Siemens-S7", 
+            "tasksize": 111015360
+        }, 
+        {
+            "algorithm": "SIP", 
+            "device": "cpu", 
+            "mode": "SIP", 
+            "tasksize": 200760000
+        }, 
+        {
+            "algorithm": "SSH Private Key", 
+            "device": "cpu", 
+            "mode": "SSH-ng", 
+            "tasksize": 39515880
+        }, 
+        {
+            "algorithm": "STRIP Password Manager", 
+            "device": "gpu", 
+            "mode": "strip-opencl", 
+            "tasksize": 15572880
+        }, 
+        {
+            "algorithm": "StarOffice SXC", 
+            "device": "gpu", 
+            "mode": "sxc-opencl", 
+            "tasksize": 2206680
+        }, 
+        {
+            "algorithm": "Sybase PROP", 
+            "device": "cpu", 
+            "mode": "Sybase-PROP", 
+            "tasksize": 36612120
+        }, 
+        {
+            "algorithm": "TCP MD5 Signatures, BGP", 
+            "device": "cpu", 
+            "mode": "tcp-md5", 
+            "tasksize": 389760000
+        }, 
+        {
+            "algorithm": "TrueCrypt 5.0+ AES-XTS-PBKDF2-HMAC-RipeMD160", 
+            "device": "cpu", 
+            "mode": "tc_aes_xts", 
+            "tasksize": 115680
+        }, 
+        {
+            "algorithm": "TrueCrypt 5.0+ AES-XTS-PBKDF2-HMAC-Whirlpool", 
+            "device": "cpu", 
+            "mode": "tc_aes_xts", 
+            "tasksize": 115680
+        }, 
+        {
+            "algorithm": "Trip Code", 
+            "device": "cpu", 
+            "mode": "tripcode", 
+            "tasksize": 278160000
+        }, 
+        {
+            "algorithm": "VNC", 
+            "device": "cpu", 
+            "mode": "VNC", 
+            "tasksize": 216480000
+        }, 
+        {
+            "algorithm": "WoWSRP, Battlenet", 
+            "device": "cpu", 
+            "mode": "WoWSRP", 
+            "tasksize": 5320320
+        }, 
+        {
+            "algorithm": "ZIP", 
+            "device": "gpu", 
+            "mode": "zip-opencl", 
+            "tasksize": 37900320
         }
-    ],
+    ], 
     "attacks": [
         {
-            "attack": "dictionary",
+            "attack": "dictionary", 
             "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --devices=%dev% --pot=%potfile% --format=%mode% %hashfile%"
-        },
+        }, 
         {
-            "attack": "combinator",
+            "attack": "combinator", 
             "command": "/opt/hashstack/programs/utils/combinator.bin -s %skip% -l %limit% %left_wordlist% %right_wordlist% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --devices=%dev% --pot=%potfile% --format=%mode% %hashfile%"
-        },
+        }, 
         {
-            "attack": "mask",
+            "attack": "mask", 
             "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --devices=%dev% --pot=%potfile% --format=%mode% %hashfile%"
-        },
+        }, 
         {
-            "attack": "rules",
+            "attack": "rules", 
             "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% -r %rules% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --devices=%dev% --pot=%potfile% --format=%mode% %hashfile%"
-        },
+        }, 
         {
-            "attack": "hybridLeft",
+            "attack": "hybridLeft", 
             "command": "/opt/hashstack/programs/utils/hybrid_6.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %wordlist% %mask% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --devices=%dev% --pot=%potfile% --format=%mode% %hashfile%"
-        },
+        }, 
         {
-            "attack": "hybridRight",
+            "attack": "hybridRight", 
             "command": "/opt/hashstack/programs/utils/hybrid_7.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --devices=%dev% --pot=%potfile% --format=%mode% %hashfile%"
         }
-    ],
+    ], 
     "is_oclHashcat": false
 }

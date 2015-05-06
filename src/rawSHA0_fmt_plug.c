@@ -102,7 +102,8 @@ static int cmp_all(void *binary, int count) {
 	return !memcmp(binary, crypt_key, BINARY_SIZE);
 }
 
-static int cmp_exact(char *source, int count){
+static int cmp_exact(char *source, int index)
+{
   return (1);
 }
 
@@ -113,7 +114,7 @@ static int cmp_one(void * binary, int index)
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
-	int count = *pcount;
+	const int count = *pcount;
 
 	SHA_Init( &ctx );
 	SHA_Update( &ctx, (unsigned char *) saved_key, strlen( saved_key ) );
@@ -122,7 +123,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	return count;
 }
 
-static void *binary(char *ciphertext)
+static void *get_binary(char *ciphertext)
 {
 	static ARCH_WORD_32 outb[BINARY_SIZE / 4];
 	unsigned char *realcipher = (unsigned char*)outb;
@@ -172,7 +173,7 @@ struct fmt_main fmt_rawSHA_0 = {
 		fmt_default_prepare,
 		valid,
 		split,
-		binary,
+		get_binary,
 		fmt_default_salt,
 #if FMT_MAIN_VERSION > 11
 		{ NULL },

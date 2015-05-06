@@ -57,7 +57,7 @@ static void done(void) {
 }
 
 static void init(struct fmt_main *self) {
-	saved_key = mem_calloc(BF_N * sizeof(*saved_key)) ;
+	saved_key = mem_calloc(BF_N, sizeof(*saved_key)) ;
 	global_work_size = 0 ;
 
 	//Prepare OpenCL environment.
@@ -120,7 +120,7 @@ static char *get_key(int index) {
 }
 
 static int crypt_all(int *pcount, struct db_salt *salt) {
-	int count = *pcount ;
+	const int count = *pcount ;
 	if (keys_mode != saved_salt.subtype) {
 		int i ;
 
@@ -142,11 +142,13 @@ static int cmp_all(void *binary, int count) {
 	return 0 ;
 }
 
-static int cmp_one(void *binary, int index) {
+static int cmp_one(void *binary, int index)
+{
 	return *(BF_word *)binary == opencl_BF_out[index][0] ;
 }
 
-static int cmp_exact(char *source, int index) {
+static int cmp_exact(char *source, int index)
+{
 	opencl_BF_std_crypt_exact(index) ;
 
 	return !memcmp(BF_common_get_binary(source), opencl_BF_out[index],

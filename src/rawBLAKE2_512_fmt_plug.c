@@ -29,15 +29,15 @@ john_register_one(&fmt_rawBLAKE2);
 #define FORMAT_LABEL			"Raw-Blake2"
 #define FORMAT_NAME			""
 #if defined(__AVX__)
-#define ALGORITHM_NAME			"AVX"
+#define ALGORITHM_NAME			"128/128 AVX"
 #elif defined(__XOP__)
-#define ALGORITHM_NAME			"XOP"
+#define ALGORITHM_NAME			"128/128 XOP"
 #elif defined(__SSE4_1__)
-#define ALGORITHM_NAME			"SSE4.1"
+#define ALGORITHM_NAME			"128/128 SSE4.1"
 #elif defined(__SSSE3__)
-#define ALGORITHM_NAME			"SSSE3"
+#define ALGORITHM_NAME			"128/128 SSSE3"
 #elif defined(__SSE2__)
-#define ALGORITHM_NAME			"SSE2"
+#define ALGORITHM_NAME			"128/128 SSE2"
 #else
 #define ALGORITHM_NAME			"32/" ARCH_BITS_STR
 #endif
@@ -68,7 +68,7 @@ static struct fmt_tests tests[] = {
 	{NULL}
 };
 
-static int (*saved_key_length);
+static int (*saved_len);
 static char (*saved_key)[PLAINTEXT_LENGTH + 1];
 static ARCH_WORD_32 (*crypt_out)
     [(BINARY_SIZE + sizeof(ARCH_WORD_32) - 1) / sizeof(ARCH_WORD_32)];
@@ -83,9 +83,19 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key_length = mem_calloc_tiny(sizeof(*saved_key_length) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_out = mem_calloc_tiny(sizeof(*crypt_out) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_len = mem_calloc(self->params.max_keys_per_crypt,
+	                       sizeof(*saved_len));
+	saved_key = mem_calloc(self->params.max_keys_per_crypt,
+	                       sizeof(*saved_key));
+	crypt_out = mem_calloc(self->params.max_keys_per_crypt,
+	                       sizeof(*crypt_out));
+}
+
+static void done(void)
+{
+	MEM_FREE(crypt_out);
+	MEM_FREE(saved_key);
+	MEM_FREE(saved_len);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -172,21 +182,21 @@ static int get_hash_6(int index)
 static void set_key(char *key, int index)
 {
 	int len = strlen(key);
-	saved_key_length[index] = len;
+	saved_len[index] = len;
 	if (len > PLAINTEXT_LENGTH)
-		len = saved_key_length[index] = PLAINTEXT_LENGTH;
+		len = saved_len[index] = PLAINTEXT_LENGTH;
 	memcpy(saved_key[index], key, len);
 }
 
 static char *get_key(int index)
 {
-	saved_key[index][saved_key_length[index]] = 0;
+	saved_key[index][saved_len[index]] = 0;
 	return saved_key[index];
 }
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
-	int count = *pcount;
+	const int count = *pcount;
 	int index = 0;
 
 #ifdef _OPENMP
@@ -194,7 +204,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	for (index = 0; index < count; index++)
 #endif
 	{
-		(void)blake2b((uint8_t *)crypt_out[index], saved_key[index], NULL, 64, saved_key_length[index], 0);
+		(void)blake2b((uint8_t *)crypt_out[index], saved_key[index], NULL, 64, saved_len[index], 0);
 	}
 	return count;
 }
@@ -242,7 +252,7 @@ struct fmt_main fmt_rawBLAKE2 = {
 		tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid,

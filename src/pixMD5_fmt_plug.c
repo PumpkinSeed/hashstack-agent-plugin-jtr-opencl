@@ -5,6 +5,11 @@
  * Converted to thin format, into $dynamic_19$ format.
  */
 
+#if AC_BUILT
+#include "autoconfig.h"
+#endif
+#ifndef DYNAMIC_DISABLED
+
 #if FMT_EXTERNS_H
 extern struct fmt_main fmt_pixMD5;
 #elif FMT_REGISTERS_H
@@ -24,7 +29,8 @@ john_register_one(&fmt_pixMD5);
 #define BENCHMARK_COMMENT	""
 #define BENCHMARK_LENGTH		0
 
-#define PLAINTEXT_LENGTH		16
+// set PLAINTEXT_LENGTH to 0, so dyna will set this  (note, 16 was right, but just let dyna set it)
+#define PLAINTEXT_LENGTH		0
 #define CIPHERTEXT_LENGTH		16
 #define BINARY_SIZE				16
 #define BINARY_ALIGN			MEM_ALIGN_WORD
@@ -124,11 +130,9 @@ static void link_funcs() {
 
 static void pixmd5_init(struct fmt_main *self)
 {
-	get_ptr();
 	if (self->private.initialized == 0) {
-		pDynamic_19 = dynamic_THIN_FORMAT_LINK(&fmt_pixMD5, Convert(Conv_Buf, pixmd5_tests[0].ciphertext), "pix-md5", 1);
-		link_funcs();;
-		fmt_pixMD5.params.algorithm_name = pDynamic_19->params.algorithm_name;
+		get_ptr();
+		pDynamic_19->methods.init(pDynamic_19);
 		self->private.initialized = 1;
 	}
 }
@@ -150,3 +154,5 @@ static void get_ptr() {
  */
 
 #endif /* plugin stanza */
+
+#endif /* DYNAMIC_DISABLED */

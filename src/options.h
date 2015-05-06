@@ -46,7 +46,8 @@
 /* Wordlist mode enabled, options.wordlist is set to the file name, or
  * we get it from john.conf */
 #define FLG_WORDLIST_CHK		0x00000080
-#define FLG_WORDLIST_SET		(FLG_WORDLIST_CHK | FLG_CRACKING_SET)
+#define FLG_WORDLIST_SET \
+	(FLG_WORDLIST_CHK | FLG_CRACKING_SET | FLG_RULES_ALLOW)
 /* Wordlist mode enabled, reading from stdin */
 #define FLG_STDIN_CHK			0x00000100
 #define FLG_STDIN_SET			(FLG_STDIN_CHK | FLG_WORDLIST_SET)
@@ -164,12 +165,15 @@
 /* PRINCE mode enabled, options.wordlist is set to the file name, or
  * we get it from john.conf */
 #define FLG_PRINCE_CHK			0x0008000000000000ULL
-#define FLG_PRINCE_SET			(FLG_PRINCE_CHK | FLG_CRACKING_SET)
+#define FLG_PRINCE_SET \
+	(FLG_PRINCE_CHK | FLG_CRACKING_SET | FLG_RULES_ALLOW)
 #define FLG_PRINCE_DIST			0x0010000000000000ULL
 #define FLG_PRINCE_KEYSPACE		0x0020000000000000ULL
 #define FLG_PRINCE_CASE_PERMUTE		0x0040000000000000ULL
 #define FLG_PRINCE_LOOPBACK		0x0080000000000000ULL
 #define FLG_PRINCE_MMAP			0x0100000000000000ULL
+#define FLG_RULES_ALLOW			0x0200000000000000ULL
+#define FLG_RULES_SET			(FLG_RULES | FLG_RULES_ALLOW)
 
 /*
  * Structure with option flags and all the parameters.
@@ -246,11 +250,6 @@ struct options_main {
  * --regen_lost_salts=#   */
 	int regen_lost_salts;
 
-#ifdef HAVE_LIBDL
-/* List of dll files to load for additional formats */
-	struct list_main *fmt_dlls;
-#endif
-
 /* Requested max_keys_per_crypt (for testing purposes) */
 	int force_maxkeys;
 
@@ -297,6 +296,8 @@ struct options_main {
 	int verbosity;
 /* Secure mode. Do not output, log or store cracked passwords. */
 	int secure;
+/* Mode that appended the uid to the user name (on display) */
+	int show_uid_on_crack;
 /* regular expression */
 	char *regex;
 /* Custom masks */

@@ -1,9 +1,9 @@
 /*
- * Developed by Claudio André <claudio.andre at correios.net.br> in 2012
+ * Developed by Claudio André <claudioandre.br at gmail.com> in 2012
  *
  * More information at http://openwall.info/wiki/john/OpenCL-SHA-512
  *
- * Copyright (c) 2012 Claudio André <claudio.andre at correios.net.br>
+ * Copyright (c) 2012-2015 Claudio André <claudioandre.br at gmail.com>
  * This program comes with ABSOLUTELY NO WARRANTY; express or implied.
  *
  * This is free software, and you are welcome to redistribute it
@@ -19,6 +19,13 @@
 
 #undef SWAP64
 #undef SWAP64_V
+
+#define SWAP(n) \
+            (((n)             << 56)     | (((n) & 0xff00UL)     << 40) |   \
+            (((n) & 0xff0000UL) << 24)   | (((n) & 0xff000000UL) << 8)  |   \
+            (((n) >> 8)  & 0xff000000UL) | (((n) >> 24) & 0xff0000UL)   |   \
+            (((n) >> 40) & 0xff00UL)     | ((n)  >> 56))
+
 
 #define SWAP64(n)       (as_ulong(as_uchar8(n).s76543210))
 #define SWAP64_V(n)     SWAP(n)

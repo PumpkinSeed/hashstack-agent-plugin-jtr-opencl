@@ -46,7 +46,13 @@
  * Exit on error. Logs the event, closes john.pot and the log file, and
  * terminates the process with non-zero exit status.
  */
-extern void real_error(char *file, int line);
+extern void real_error(char *file, int line)
+#ifdef __GNUC__
+	__attribute__ ((__noreturn__));
+#else
+	;
+#endif
+
 #define error(...) real_error(__FILE__, __LINE__)
 
 /*
@@ -54,6 +60,7 @@ extern void real_error(char *file, int line);
  */
 extern void real_pexit(char *file, int line, char *format, ...)
 #ifdef __GNUC__
+	__attribute__ ((__noreturn__))
 	__attribute__ ((format (printf, 3, 4)));
 #else
 	;
@@ -100,6 +107,15 @@ extern char *strnzcat(char *dst, const char *src, int size);
  * atoi() for unsigned data if the data can EVER be over MAX_INT.
  */
 extern unsigned atou(const char *src);
+
+/*
+ * Similar to strtok(), but properly handles adjacent delmiters as
+ * empty strings.  strtok() in the CRTL merges adjacent delimiters
+ * and sort of 'skips' them. This one also returns 'empty' tokens
+ * for any leading or trailing delims. strtok() strips those off
+ * also.
+ */
+char *strtokm(char *s1, const char *delimit);
 
 #ifndef __has_feature
 # define __has_feature(x) 0

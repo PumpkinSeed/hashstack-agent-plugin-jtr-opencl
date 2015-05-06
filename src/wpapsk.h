@@ -145,7 +145,7 @@ static hccap_t *decode_hccap(char *ciphertext)
 	return &hccap;
 }
 
-static void *binary(char *ciphertext)
+static void *get_binary(char *ciphertext)
 {
 	static union {
 		unsigned char c[BINARY_SIZE];
@@ -157,7 +157,7 @@ static void *binary(char *ciphertext)
 	return binary.c;
 }
 
-static void *salt(char *ciphertext)
+static void *get_salt(char *ciphertext)
 {
 	static hccap_t s;
 
@@ -451,7 +451,7 @@ static int cmp_one(void *binary, int index)
 	return 1;
 }
 
-static int cmp_exact(char *source, int count)
+static int cmp_exact(char *source, int index)
 {
 	return 1;
 }

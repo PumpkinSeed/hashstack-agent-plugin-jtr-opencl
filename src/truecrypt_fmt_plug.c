@@ -139,10 +139,16 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	key_buffer = mem_calloc_tiny(sizeof(*key_buffer) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	first_block_dec = mem_calloc_tiny(sizeof(*first_block_dec) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	key_buffer = mem_calloc(self->params.max_keys_per_crypt,
+	                        sizeof(*key_buffer));
+	first_block_dec = mem_calloc(self->params.max_keys_per_crypt,
+	                             sizeof(*first_block_dec));
+}
+
+static void done(void)
+{
+	MEM_FREE(first_block_dec);
+	MEM_FREE(key_buffer);
 }
 
 static int valid(char* ciphertext, int pos)
@@ -284,7 +290,8 @@ static void AES_256_XTS_first_sector(const unsigned char *double_key,
 }
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
-	int i, count = *pcount;
+	int i;
+	const int count = *pcount;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -479,14 +486,14 @@ static unsigned int tc_hash_algorithm(void *salt)
 struct fmt_main fmt_truecrypt = {
 	{
 		"tc_aes_xts",                     // FORMAT_LABEL
-		"TrueCrypt (RIPEMD160/SHA512/WHIRLPOOL) AES256_XTS", // FORMAT_NAME
+		"TrueCrypt AES256_XTS", // FORMAT_NAME
 #if SSE_GROUP_SZ_SHA512
-		SHA512_ALGORITHM_NAME,            // ALGORITHM_NAME,
+		"SHA512 " SHA512_ALGORITHM_NAME " /RIPEMD160/WHIRLPOOL",
 #else
 #if ARCH_BITS >= 64
-		"64/" ARCH_BITS_STR,              // ALGORITHM_NAME,
+		"SHA512 64/" ARCH_BITS_STR " /RIPEMD160/WHIRLPOOL",
 #else
-		"32/" ARCH_BITS_STR,              // ALGORITHM_NAME,
+		"SHA512 32/" ARCH_BITS_STR " /RIPEMD160/WHIRLPOOL",
 #endif
 #endif
 		"",                               // BENCHMARK_COMMENT
@@ -513,7 +520,7 @@ struct fmt_main fmt_truecrypt = {
 		tests_all
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid_truecrypt,
@@ -548,8 +555,8 @@ struct fmt_main fmt_truecrypt = {
 struct fmt_main fmt_truecrypt_ripemd160 = {
 	{
 		"tc_ripemd160",                   // FORMAT_LABEL
-		"TrueCrypt RIPEMD160 AES256_XTS", // FORMAT_NAME
-		"32/" ARCH_BITS_STR,              // ALGORITHM_NAME,
+		"TrueCrypt AES256_XTS", // FORMAT_NAME
+		"RIPEMD160 32/" ARCH_BITS_STR,    // ALGORITHM_NAME,
 		"",                               // BENCHMARK_COMMENT
 		-1,                               // BENCHMARK_LENGTH
 		0,
@@ -567,7 +574,7 @@ struct fmt_main fmt_truecrypt_ripemd160 = {
 		tests_ripemd160
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid_ripemd160,
@@ -600,14 +607,14 @@ struct fmt_main fmt_truecrypt_ripemd160 = {
 struct fmt_main fmt_truecrypt_sha512 = {
 	{
 		"tc_sha512",                      // FORMAT_LABEL
-		"TrueCrypt SHA512 AES256_XTS",    // FORMAT_NAME
+		"TrueCrypt AES256_XTS",    // FORMAT_NAME
 #if SSE_GROUP_SZ_SHA512
-		SHA512_ALGORITHM_NAME,            // ALGORITHM_NAME,
+		"SHA512 " SHA512_ALGORITHM_NAME,            // ALGORITHM_NAME,
 #else
 #if ARCH_BITS >= 64
-		"64/" ARCH_BITS_STR,              // ALGORITHM_NAME,
+		"SHA512 64/" ARCH_BITS_STR,
 #else
-		"32/" ARCH_BITS_STR,              // ALGORITHM_NAME,
+		"SHA512 32/" ARCH_BITS_STR,
 #endif
 #endif
 		"",                               // BENCHMARK_COMMENT
@@ -632,7 +639,7 @@ struct fmt_main fmt_truecrypt_sha512 = {
 		tests_sha512
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid_sha512,
@@ -665,11 +672,11 @@ struct fmt_main fmt_truecrypt_sha512 = {
 struct fmt_main fmt_truecrypt_whirlpool = {
 	{
 		"tc_whirlpool",                   // FORMAT_LABEL
-		"TrueCrypt WHIRLPOOL AES256_XTS", // FORMAT_NAME
+		"TrueCrypt AES256_XTS", // FORMAT_NAME
 #if ARCH_BITS >= 64
-		"64/" ARCH_BITS_STR,              // ALGORITHM_NAME,
+		"WHIRLPOOL 64/" ARCH_BITS_STR,    // ALGORITHM_NAME,
 #else
-		"32/" ARCH_BITS_STR,              // ALGORITHM_NAME,
+		"WHIRLPOOL 32/" ARCH_BITS_STR,    // ALGORITHM_NAME,
 #endif
 		"",                               // BENCHMARK_COMMENT
 		-1,                               // BENCHMARK_LENGTH
@@ -688,7 +695,7 @@ struct fmt_main fmt_truecrypt_whirlpool = {
 		tests_whirlpool
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid_whirlpool,

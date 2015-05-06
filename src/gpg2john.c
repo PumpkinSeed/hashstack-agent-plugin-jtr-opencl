@@ -525,6 +525,8 @@ IV_LEN[] = {
 public int
 iv_len(unsigned int type)
 {
+	(void) SYM_ALGS; /* Mutes a compiler warning in clang */
+
 	if (type < SYM_ALGS_NUM)
 		return IV_LEN[type];
 	else
@@ -875,7 +877,7 @@ public void
 Symmetric_Key_Encrypted_Session_Key_Packet(int len)
 {
 	int left = len, alg;
-	fprintf(stderr, "(Symmetric_Key_Encrypted_Session_Key_Packet) Make us add support for such files ;(\n");
+	fprintf(stderr, "[!] Symmetrically encrypted PGP files are not supported, currently. Try using \"PGPCrack-NG\" program instead.\n");
 	ver(NULL_VER, 4, Getc());
 	alg = Getc();
 	sym_algs(alg);
@@ -1441,7 +1443,7 @@ parse_packet(void)
 		}
 		if (tag < TAG_NUM)
 			// printf("%s(tag %d)", TAG[tag], tag);
-			;
+			(void) TAG; /* Mutes a compiler warning in clang */
 		else
 			fprintf(stderr, "unknown(tag %d)", tag);
 
@@ -1517,6 +1519,7 @@ parse_signature_subpacket(string prefix, int tlen)
 		else
 			printf("\t%s: unknown(sub %d%s)", prefix, subtype, critical ? ", critical" : "");
 		printf("(%d bytes)\n", len); */
+		(void) SIGSUB; /* mute a compiler warning in clang */
 		if (subtype < SIGSUB_NUM && sigsub_func[subtype] != NULL)
 			(*sigsub_func[subtype])(len);
 		else

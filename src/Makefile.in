@@ -40,17 +40,12 @@ subdirs = aes escrypt
 top_srcdir = @top_srcdir@
 srcdir = @srcdir@
 prefix = @prefix@
-exec_prefix = @exec_prefix@
-bindir = $(exec_prefix)/bin
-infodir = $(prefix)/info
-libdir = $(prefix)/lib/gnudl
-mandir = $(prefix)/man/man1
 
 # CUDA settings. See output of "nvcc -h"
 NVCC_FLAGS = -c -Xptxas -v -fmad=true
 
 CPPFLAGS = @CPPFLAGS@
-CFLAGSX = -c @CFLAGS@ @CFLAGS_EXTRA@ @MEMDBG_CFLAGS@ @HAVE_CUDA@ @OPENSSL_CFLAGS@ @OPENMP_CFLAGS@ @HAVE_MPI@ @PTHREAD_CFLAGS@ $(RELEASE_BLD)
+CFLAGSX = -c @CFLAGS@ @CFLAGS_EXTRA@ @MEMDBG_CFLAGS@ @HAVE_CUDA@ @OPENSSL_CFLAGS@ @OPENMP_CFLAGS@ @HAVE_MPI@ @PTHREAD_CFLAGS@ $(RELEASE_BLD) $(CPPFLAGS)
 # CFLAGS for use on the main john.c file only
 CFLAGS_MAIN = -DAC_BUILT @CC_MAIN_CPU@ $(CFLAGSX)
 CFLAGS = -DAC_BUILT @CC_CPU@ $(CFLAGSX)
@@ -68,14 +63,15 @@ JOHN_OBJS = \
 	jumbo.o john-mpi.o \
 	DES_fmt.o DES_std.o DES_bs.o DES_bs_b.o \
 	BSDI_fmt.o \
-	MD5_fmt.o MD5_std.o \
-	BF_fmt.o BF_std.o \
+	MD5_fmt.o MD5_std.o cryptmd5_common.o \
+	BF_fmt.o BF_std.o BF_common.o \
 	scrypt_fmt.o \
 	escrypt/crypto_scrypt-best.o escrypt/crypto_scrypt-common.o \
 	escrypt/sha256.o \
 	AFS_fmt.o \
 	LM_fmt.o \
 	trip_fmt.o \
+	NT_fmt.o \
 	timer.o \
 	md5_go.o \
 	md5.o \
@@ -84,11 +80,12 @@ JOHN_OBJS = \
 	base64.o base64_convert.o \
 	md4.o sha2.o \
 	dynamic_fmt.o dynamic_parser.o dynamic_preloads.o dynamic_utils.o dynamic_big_crypt.o \
+	ripemd.o tiger.o \
 	ssh2john.o \
 	pfx2john.o \
 	unrarcmd.o unrarfilter.o unrarhlp.o unrar.o unrarppm.o unrarvm.o \
 	rar2john.o \
-	zip2john.o gladman_hmac.o gladman_pwd2key.o \
+	zip2john.o pkzip.o gladman_hmac.o gladman_pwd2key.o \
 	racf2john.o \
 	keychain2john.o \
 	kwallet2john.o \
@@ -99,7 +96,6 @@ JOHN_OBJS = \
 	truecrypt_volume2john.o \
 	hccap2john.o \
 	$(PLUGFORMATS_OBJS) \
-	plugin.o \
 	dyna_salt.o dummy.o \
 	gost.o \
 	common-gpu.o \
@@ -112,6 +108,7 @@ JOHN_OBJS = \
 	listconf.o \
 	fake_salts.o \
 	win32_memmap.o \
+	uaf_encode.o \
 	unicode.o \
 	unshadow.o \
 	unafs.o \
@@ -201,7 +198,7 @@ endif
 # target turns off optimizations for better debugging, and defines DEBUG
 # so code can adopt.
 debug:
-	$(MAKE) default CFLAGS="-DDEBUG $(CFLAGS) -O0" CFLAGS_MAIN="-DDEBUG $(CFLAGS_MAIN) -O0"
+	$(MAKE) default CFLAGS="-DDEBUG $(CFLAGS) @O_DEBUG@" CFLAGS_MAIN="-DDEBUG $(CFLAGS_MAIN) @O_DEBUG@"
 
 # Similar but just turn memdbg on instead, and normal optimizations.
 memdbg:
@@ -227,7 +224,7 @@ cuda_cryptmd5.o:  cuda_cryptmd5.h cuda/cryptmd5.cu cuda_common.o
 cuda_phpass.o:  cuda_phpass.h cuda/phpass.cu cuda_common.o
 	cd cuda; $(NVCC) $(NVCC_FLAGS) phpass.cu -o ../cuda_phpass.o
 
-cuda_cryptsha256.o:  cuda_cryptsha256.h cuda/cryptsha256.cu cuda_common.o
+cuda_cryptsha256.o:  cuda_cryptsha256.h cuda/cryptsha256.cu cuda_common.o cryptsha256_common.h
 	cd cuda; $(NVCC) $(NVCC_FLAGS) cryptsha256.cu -o ../cuda_cryptsha256.o
 
 cuda_cryptsha512.o:  cuda_cryptsha512.h cuda/cryptsha512.cu cuda_common.o
@@ -267,6 +264,8 @@ cuda_pwsafe.o: cuda_pwsafe.h cuda/pwsafe.cu cuda_common.o
 
 ######## auto-generated, best-effort
 AFS_fmt.o:	AFS_fmt.c arch.h misc.h params.h DES_std.h common.h formats.h memdbg.h
+
+BF_common.o:	BF_common.c arch.h misc.h common.h formats.h BF_common.h
 
 BF_fmt.o:	BF_fmt.c arch.h misc.h BF_std.h common.h formats.h memdbg.h
 
@@ -323,6 +322,8 @@ cprepair.o:	cprepair.c autoconfig.h unicode.h memdbg.h
 cracker.o:	cracker.c os.h arch.h misc.h math.h params.h memory.h signals.h idle.h formats.h dyna_salt.h loader.h logger.h status.h recovery.h external.h options.h mask.h unicode.h john.h fake_salts.h john-mpi.h path.h jumbo.h common-gpu.h memdbg.h
 
 crc32.o:	crc32.c memory.h crc32.h memdbg.h
+
+cryptmd5_common.o:	cryptmd5_common.c arch.h misc.h common.h formats.h cryptmd5_common.h
 
 detect.o:	detect.c memdbg.h
 
@@ -424,6 +425,8 @@ mmap-windows.o:	mmap-windows.c memdbg.h
 
 nonstd.o:	nonstd.c
 
+NT_fmt.o:	NT_fmt.c arch.h misc.h memory.h common.h formats.h options.h unicode.h aligned.h johnswap.h memdbg.h
+
 opencl_autotune.o:	opencl_autotune.c common-opencl.h memdbg.h
 
 options.o:	options.c os.h arch.h misc.h params.h memory.h list.h loader.h logger.h status.h recovery.h options.h bench.h external.h john.h dynamic.h unicode.h fake_salts.h regex.h john-mpi.h common-opencl.h prince.h memdbg.h john_build_rule.h
@@ -436,7 +439,7 @@ path.o:	path.c autoconfig.h misc.h params.h memory.h path.h memdbg.h
 
 pfx2john.o:	pfx2john.c jumbo.h common.h arch.h params.h memdbg.h
 
-plugin.o:	plugin.c autoconfig.h Win32-dlfcn-port.h plugin.h memdbg.h
+pkzip.o:	pkzip.c arch.h misc.h common.h memory.h formats.h pkzip.h memdbg.h
 
 putty2john.o:	putty2john.c autoconfig.h memory.h jumbo.h memdbg.h
 
@@ -454,6 +457,8 @@ recovery.o:	recovery.c os.h arch.h misc.h params.h path.h memory.h options.h loa
 
 regex.o:	regex.c regex.h loader.h logger.h status.h os.h signals.h recovery.h options.h config.h cracker.h john.h external.h memdbg.h
 
+ripemd.o:	ripemd.c sph_ripemd.h memdbg.h md_helper.c md_helper.c md_helper.c md_helper.c md_helper.c
+
 rpp.o:	rpp.c arch.h params.h config.h rpp.h common.h memdbg.h
 
 rules.o:	rules.c arch.h misc.h params.h common.h memory.h formats.h loader.h logger.h rpp.h rules.h options.h john.h unicode.h encoding_data.h memdbg.h
@@ -470,7 +475,7 @@ signals.o:	signals.c os.h arch.h misc.h params.h tty.h options.h config.h bench.
 
 single.o:	single.c misc.h params.h common.h memory.h os.h signals.h loader.h logger.h status.h recovery.h options.h rpp.h rules.h external.h cracker.h john.h unicode.h config.h memdbg.h
 
-sse-intrinsics.o:	sse-intrinsics.c arch.h memory.h md5.h MD5_std.h stdint.h johnswap.h sse-intrinsics-load-flags.h aligned.h memdbg.h
+sse-intrinsics.o:	sse-intrinsics.c pseudo_intrinsics.h arch.h memory.h md5.h MD5_std.h stdint.h johnswap.h sse-intrinsics-load-flags.h aligned.h memdbg.h
 
 ssh2john.o:	ssh2john.c jumbo.h common.h arch.h params.h memdbg.h
 
@@ -490,7 +495,9 @@ tty.o:	tty.c arch.h tty.h memdbg.h
 
 uaf2john.o:	uaf2john.c uaf_encode.h uaf_raw.h memdbg.h
 
-uaf_hash.o:	uaf_hash.c uaf_encode_plug.c memdbg.h
+uaf_encode.o:	uaf_encode.c arch.h uaf_raw.h uaf_encode.h memdbg.h uaf_hash.c
+
+uaf_hash.o:	uaf_hash.c uaf_encode.c memdbg.h
 
 unafs.o:	unafs.c misc.h memdbg.h
 
@@ -758,8 +765,8 @@ aes/aes.a:
 ../run/vncpcap2john@EXE_EXT@: vncpcap2john.o
 	$(CC) -DAC_BUILT -Wall vncpcap2john.o @MEMDBG_CFLAGS@ memdbg.o $(LDFLAGS) @PCAP_LIBS@ @OPENMP_CFLAGS@ -o ../run/vncpcap2john
 
-../run/uaf2john@EXE_EXT@: uaf2john.o uaf_encode_plug.o
-	$(LD) $(LDFLAGS) @PTHREAD_CFLAGS@ @PTHREAD_LIBS@ uaf2john.o uaf_encode_plug.o @MEMDBG_CFLAGS@ memdbg.o @OPENMP_CFLAGS@ -o ../run/uaf2john
+../run/uaf2john@EXE_EXT@: uaf2john.o uaf_encode.o
+	$(LD) $(LDFLAGS) @PTHREAD_CFLAGS@ @PTHREAD_LIBS@ uaf2john.o uaf_encode.o @MEMDBG_CFLAGS@ memdbg.o @OPENMP_CFLAGS@ -o ../run/uaf2john
 
 # Note that this is NOT depending on PCAP lib. It is self-contained.
 ../run/wpapcap2john@EXE_EXT@: wpapcap2john.o
@@ -781,7 +788,7 @@ john.o: john.c autoconfig.h os.h params.h arch.h openssl_local_overrides.h \
 	formats.h dyna_salt.h loader.h logger.h status.h recovery.h options.h \
 	config.h bench.h charset.h single.h wordlist.h inc.h mask.h mkv.h \
 	external.h batch.h dynamic.h fake_salts.h listconf.h john-mpi.h \
-	regex.h unicode.h plugin.h common-opencl.h cuda_common.h prince.h \
+	regex.h unicode.h common-opencl.h cuda_common.h prince.h \
 	john_build_rule.h memdbg.h fmt_externs.h fmt_registers.h
 	$(CC) $(CFLAGS_MAIN) $(OPT_NORMAL) -O0 $*.c
 
@@ -905,11 +912,11 @@ clean-intrinsics:
 	$(RM) sse-intrinsics-64.S sse-intrinsics-32.S sse-intrinsics-win32.S
 
 sse-intrinsics-64.S:
-	$(LN) x86-64.h arch.h
+	$(LN) -f x86-64.h arch.h
 	icc -S -o sse-intrinsics-64.S sse-intrinsics.c -O2 -fno-builtin -fno-verbose-asm -openmp -DUSING_ICC_S_FILE -Wall
 
 sse-intrinsics-32.S:
-	$(LN) x86-sse.h arch.h
+	$(LN) -f x86-sse.h arch.h
 	icc -m32 -S -o sse-intrinsics-32.S sse-intrinsics.c -O2 -fno-builtin -fno-verbose-asm -openmp -DUSING_ICC_S_FILE -Wall
 	perl sse2i_winfix.pl sse-intrinsics-32.S sse-intrinsics-win32.S
 	mv sse-intrinsics-win32.S sse-intrinsics-32.S
@@ -983,53 +990,19 @@ distclean: clean
 	$(RM) arch.h
 	$(RM) fmt_registers.h fmt_externs.h john_build_rule.h
 
-# a rule to make snapshots  (NOTE, still to be done for JtR)
-snapshot: $(SOURCES) $(DOCS) $(OTHERFILES)
-	@echo
-	@echo "->Note: The version for now is hacked into Makefile.in as"
-	@echo "->" $(VERS)
-	@echo
-	@echo "->copying all release files to the directory " xyplot-$(VERS)
-	@echo
-	tar cf - $(SOURCES) $(DOCS) $(OTHERFILES) | gzip > xyplot-$(VERS).tar.gz
-	-mkdir xyplot-$(VERS)
-	gzcat xyplot-$(VERS).tar.gz | (cd xyplot-$(VERS); tar xf -)
-	$(RM) xyplot-$(VERS).tar.gz
-	@echo
-	@echo "->making the compressed tar file " xyplot-$(VERS).tar.gz
-	@echo
-	tar cf - xyplot-$(VERS) | gzip > xyplot-$(VERS).tar.gz
-	@echo
-#	@echo "->placing the snapshot for anonymous ftp in " $(FTPDIR)
-#	@echo
-#	rcp xyplot-$(VERS).tar.gz $(FTPDIR)
-	echo "->removnig the temporary directory " xyplot-$(VERS)
-	/bin/rm -rf xyplot-$(VERS)             # remove the old directory
-
 install: default shell-completion
 	@echo Stripping executables.
 	$(STRIP) $(PROJ)
-
-#install:
-#	@for dir in ${subdirs}; do \
-#	  (cd $$dir && $(MAKE) install) \
-#	  || case "$(MFLAGS)" in *k*) fail=yes;; *) exit 1;; esac; \
-#	done && test -z "$$fail"
-
-# TBD JtR
-#install: all
-#	$(top_srcdir)/mkinstalldirs $(bindir)
-#	$(top_srcdir)/mkinstalldirs $(libdir)
-#	$(INSTALL) xyplot $(bindir)
-#	$(INSTALL) xyps $(bindir)
-#	$(INSTALL) xyug $(bindir)
-#	$(INSTALL) xypost $(libdir)
-
-# TBD JtR
-uninstall:
-	-$(RM) $(bindir)/xyplot
-	-$(RM) $(bindir)/xyps
-	-$(RM) $(bindir)/xyug
-	-$(RM) $(libdir)/xypost
+#ifneq ($(prefix), ../run)
+#	@echo Copying binaries to $(prefix)
+#	$(MKDIR) $(prefix)
+#	$(CP) -p -P -R ../run/*.{py,pl,rb} $(PROJ) $(prefix)
+#	@echo Copying data and config files to $(prefix)
+#	$(MKDIR) $(prefix)
+#	$(CP) -p -P -R ../run/*.{chr,conf,lst} $(prefix)
+#ifdef WITH_OPENCL
+#	$(CP) -p -P -R ../run/kernels $(prefix)
+#endif
+#endif
 
 include Makefile.dep

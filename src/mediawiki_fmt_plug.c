@@ -39,6 +39,10 @@ userName2:$B$107$dd494cb03ac1c5b8f8d2dddafca2f7a6:1552:0::emailaddress@gmail.com
  *
  */
 
+#if AC_BUILT
+#include "autoconfig.h"
+#endif
+#ifndef DYNAMIC_DISABLED
 
 #if FMT_EXTERNS_H
 extern struct fmt_main fmt_mediawiki;
@@ -71,7 +75,8 @@ john_register_one(&fmt_mediawiki);
 #define BINARY_ALIGN		MEM_ALIGN_WORD
 #define SALT_ALIGN			MEM_ALIGN_WORD
 
-#define PLAINTEXT_LENGTH	32
+// set PLAINTEXT_LENGTH to 0, so dyna will set this
+#define PLAINTEXT_LENGTH	0
 
 static struct fmt_tests mediawiki_tests[] = {
 	{"$B$113$de2874e33da25313d808d2a8cbf31485",      "qwerty"},
@@ -194,20 +199,11 @@ struct fmt_main fmt_mediawiki =
 	}
 };
 
-static void link_funcs() {
-	fmt_mediawiki.methods.salt   = our_salt;
-	fmt_mediawiki.methods.binary = our_binary;
-	fmt_mediawiki.methods.split = our_split;
-	fmt_mediawiki.methods.prepare = fmt_default_prepare;
-}
-
 static void mediawiki_init(struct fmt_main *self)
 {
-	get_ptr();
 	if (self->private.initialized == 0) {
-		pDynamic_9 = dynamic_THIN_FORMAT_LINK(&fmt_mediawiki, Convert(Conv_Buf, mediawiki_tests[0].ciphertext), "mediawiki", 1);
-		link_funcs();
-		fmt_mediawiki.params.algorithm_name = pDynamic_9->params.algorithm_name;
+		get_ptr();
+		pDynamic_9->methods.init(pDynamic_9);
 		self->private.initialized = 1;
 	}
 }
@@ -215,14 +211,13 @@ static void mediawiki_init(struct fmt_main *self)
 static void get_ptr() {
 	if (!pDynamic_9) {
 		pDynamic_9 = dynamic_THIN_FORMAT_LINK(&fmt_mediawiki, Convert(Conv_Buf, mediawiki_tests[0].ciphertext), "mediawiki", 0);
-		link_funcs();
+		fmt_mediawiki.params.algorithm_name = pDynamic_9->params.algorithm_name;
 		fmt_mediawiki.methods.salt   = our_salt;
 		fmt_mediawiki.methods.binary = our_binary;
 		fmt_mediawiki.methods.split = our_split;
 		fmt_mediawiki.methods.prepare = fmt_default_prepare;
 	}
 }
-
 
 /**
  * GNU Emacs settings: K&R with 1 tab indent.
@@ -234,3 +229,5 @@ static void get_ptr() {
  */
 
 #endif /* plugin stanza */
+
+#endif /* DYNAMIC_DISABLED */

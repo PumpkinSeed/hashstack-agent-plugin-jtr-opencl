@@ -24,11 +24,15 @@
 #if !defined (__DYNAMIC___H)
 #define __DYNAMIC___H
 
+#include "arch.h"
+#ifndef DYNAMIC_DISABLED
+
+#include "sse-intrinsics.h"
 #include <openssl/opensslv.h>
 
 #ifdef _OPENMP
-#define DYNA_OMP_PARAMS int first, int last, int tid
-#define DYNA_OMP_PARAMSm int first, int last, int tid,
+#define DYNA_OMP_PARAMS unsigned int first, unsigned int last, unsigned int tid
+#define DYNA_OMP_PARAMSm unsigned int first, unsigned int last, unsigned int tid,
 #define DYNA_OMP_PARAMSd first, last, tid
 #define DYNA_OMP_PARAMSdm first, last, tid,
 #else
@@ -558,5 +562,7 @@ extern void DynamicFunc__MD4_crypt_input1_overwrite_input1_base16(DYNA_OMP_PARAM
 extern void DynamicFunc__MD4_crypt_input2_overwrite_input2_base16(DYNA_OMP_PARAMS);
 extern void DynamicFunc__MD4_crypt_input1_overwrite_input2_base16(DYNA_OMP_PARAMS);
 extern void DynamicFunc__MD4_crypt_input2_overwrite_input1_base16(DYNA_OMP_PARAMS);
+
+#endif /* DYNAMIC_DISABLED */
 
 #endif // __DYNAMIC___H

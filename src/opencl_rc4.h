@@ -22,7 +22,8 @@
 
 // None 2885 626 13860 8097
 #define RC4_IV32 // 3633 696 14278 8118
-#if !gpu_amd(DEVICE_INFO) /* bug in Catalyst 14.9, besides it is slower */
+#if !gpu_amd(DEVICE_INFO) || DEV_VER_MAJOR < 1445
+/* bug in Catalyst 14.9, besides it is slower */
 #define RC4_UNROLLED_KEY // 3893 817 14340 7245
 #define RC4_UNROLLED // 3932 848 14348 7847
 #endif
@@ -83,13 +84,14 @@ __constant uint rc4_iv[64] = { 0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,
  */
 inline void rc4(
 #ifdef RC4_USE_LOCAL
-                __local uint *state,
+                __local uint *restrict state,
 #endif
-                const uint *key,
+                const uint *restrict key,
 #ifdef RC4_IN_PLACE
                 uint *buf
 #else
-                MAYBE_CONSTANT uint *in, __global uint *out
+                MAYBE_CONSTANT uint *restrict in,
+                __global uint *restrict out
 #endif
 	)
 {

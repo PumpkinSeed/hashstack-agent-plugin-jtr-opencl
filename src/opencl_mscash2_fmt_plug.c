@@ -104,7 +104,7 @@ static void init(struct fmt_main *self) {
 	opencl_preinit();
 
 	///Allocate memory
-	key_host = mem_calloc(self -> params.max_keys_per_crypt * sizeof(*key_host)) ;
+	key_host = mem_calloc(self -> params.max_keys_per_crypt, sizeof(*key_host)) ;
 	dcc_hash_host = (cl_uint*)mem_alloc(4 * sizeof(cl_uint) * MAX_KEYS_PER_CRYPT) ;
 	dcc2_hash_host = (cl_uint*)mem_alloc(4 * sizeof(cl_uint) * MAX_KEYS_PER_CRYPT) ;
 	hmac_sha1_out  = (cl_uint*)mem_alloc(5 * sizeof(cl_uint) * MAX_KEYS_PER_CRYPT) ;
@@ -160,7 +160,7 @@ static void DCC(unsigned char *salt, unsigned int username_len,
 	}
 }
 
-static void done() {
+static void done(void) {
 	MEM_FREE(dcc2_hash_host) ;
 	MEM_FREE(dcc_hash_host) ;
 	MEM_FREE(key_host) ;
@@ -173,7 +173,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	return mscash2_valid(ciphertext, MAX_SALT_LENGTH, self);
 }
 
-static void *binary(char *ciphertext)
+static void *get_binary(char *ciphertext)
 {
 	static unsigned int 	binary[4] ;
 	int 			i ;
@@ -192,7 +192,7 @@ static void *binary(char *ciphertext)
 	return binary ;
 }
 
-static void *salt(char *ciphertext)
+static void *get_salt(char *ciphertext)
 {
 	static ms_cash2_salt salt;
 	char *pos = strchr(ciphertext, '#') + 1;
@@ -265,7 +265,7 @@ static void pbkdf2_iter0(unsigned int *input_dcc_hash,unsigned char *salt_buffer
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
-	int count = *pcount ;
+	const int count = *pcount ;
 	int salt_len;
 #ifdef _DEBUG
 	struct timeval startc, endc, startg, endg ;
@@ -360,15 +360,17 @@ static int cmp_all(void *binary, int count) {
 	return 0 ;
 }
 
-static int cmp_one(void *binary, int index) {
+static int cmp_one(void *binary, int index)
+{
 	return 1 ;
 }
 
-static int cmp_exact(char *source, int count) {
+static int cmp_exact(char *source, int index)
+{
       unsigned int 	*bin, i ;
 
-      bin = (unsigned int*)binary(source) ;
-      i = 4 * count + 1 ;
+      bin = (unsigned int*)get_binary(source) ;
+      i = 4 * index + 1 ;
 
       if (bin[1] != dcc2_hash_host[i++])
 		return 0 ;
@@ -420,8 +422,8 @@ struct fmt_main fmt_opencl_mscash2 = {
 		mscash2_prepare,
 		valid,
 		mscash2_split,
-		binary,
-		salt,
+		get_binary,
+		get_salt,
 #if FMT_MAIN_VERSION > 11
 		{ NULL },
 #endif

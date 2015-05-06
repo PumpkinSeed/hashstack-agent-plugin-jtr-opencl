@@ -35,6 +35,8 @@
 #include "dynamic.h"
 #include "memdbg.h"
 
+#ifndef DYNAMIC_DISABLED
+
 void dynamic_DISPLAY_ALL_FORMATS()
 {
 	int i;
@@ -48,8 +50,10 @@ void dynamic_DISPLAY_ALL_FORMATS()
 		Type[13] = 0;
 		cp = strchr(Type, ':');
 		if (cp) *cp = 0;
+#ifndef DEBUG
 		if (cfg_get_bool(SECTION_DISABLED, SUBSECTION_FORMATS, Type, 0))
 			continue;
+#endif
 		printf ("Format = %s%s  type = %s\n", Type, strlen(Type)<10?" ":"", sz);
 	}
 
@@ -176,3 +180,5 @@ char *dynamic_FIX_SALT_TO_HEX(char *ciphertext) {
 	}
 	return ciphertext;
 }
+
+#endif /* DYNAMIC_DISABLED */

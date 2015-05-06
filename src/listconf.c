@@ -11,6 +11,12 @@
 #include "autoconfig.h"
 #endif
 
+#if HAVE_OPENCL
+#define _BSD_SOURCE 1
+#define _DEFAULT_SOURCE 1
+#endif
+#define NEED_OS_FLOCK
+#include "os.h"
 
 #if !AC_BUILT
 # include <string.h>
@@ -47,6 +53,10 @@
 #endif
 #endif
 
+#if __GLIBC__
+#include <gnu/libc-version.h>
+#endif
+
 #include "regex.h"
 
 #ifdef NO_JOHN_BLD
@@ -72,20 +82,25 @@ extern void cuda_device_list();
 #endif
 #else
 #ifdef _OPENMP
-#define _MP_VERSION " OMP"
+#define _MP_VERSION "_omp"
 #else
 #define _MP_VERSION ""
 #endif
 #endif
 #ifdef DEBUG
-#define DEBUG_STRING "-dbg"
+#define DEBUG_STRING "_dbg"
 #else
 #define DEBUG_STRING ""
 #endif
+#ifdef WITH_ASAN
+#define ASAN_STRING "_asan"
+#else
+#define ASAN_STRING ""
+#endif
 #if defined(MEMDBG_ON) && defined(MEMDBG_EXTRA_CHECKS)
-#define MEMDBG_STRING "-memdbg_ex"
+#define MEMDBG_STRING "_memdbg-ex"
 #elif defined(MEMDBG_ON)
-#define MEMDBG_STRING "-memdbg"
+#define MEMDBG_STRING "_memdbg"
 #else
 #define MEMDBG_STRING ""
 #endif
@@ -144,8 +159,11 @@ static void listconf_list_build_info(void)
 #ifdef __GNU_MP_VERSION
 	int gmp_major, gmp_minor, gmp_patchlevel;
 #endif
-	puts("Version: " JOHN_VERSION _MP_VERSION DEBUG_STRING MEMDBG_STRING);
+	puts("Version: " JOHN_VERSION _MP_VERSION DEBUG_STRING MEMDBG_STRING ASAN_STRING);
 	puts("Build: " JOHN_BLD);
+#ifdef __TIMESTAMP__
+	puts("Time stamp: " __TIMESTAMP__);
+#endif
 	printf("Arch: %d-bit %s\n", ARCH_BITS,
 	       ARCH_LITTLE_ENDIAN ? "LE" : "BE");
 #if JOHN_SYSTEMWIDE
@@ -165,6 +183,13 @@ static void listconf_list_build_info(void)
 	printf("CHARSET_LENGTH: %d\n", CHARSET_LENGTH);
 	printf("Max. Markov mode level: %d\n", MAX_MKV_LVL);
 	printf("Max. Markov mode password length: %d\n", MAX_MKV_LEN);
+#if FCNTL_LOCKS
+	puts("File locking: fcntl()");
+#elif OS_FLOCK
+	puts("File locking: flock()");
+#else
+	puts("File locking: NOT supported by this build - do not run concurrent sessions!");
+#endif
 #ifdef __VERSION__
 	printf("Compiler version: %s\n", __VERSION__);
 #endif
@@ -175,9 +200,34 @@ static void listconf_list_build_info(void)
 #ifdef __ICC
 	printf("icc version: %d\n", __ICC);
 #endif
-#ifdef __clang_version__
+#if defined(__clang_version__) && !__INTEL_COMPILER
 	printf("clang version: %s\n", __clang_version__);
 #endif
+
+#ifdef __GLIBC_MINOR__
+#ifdef __GLIBC__
+	printf("GNU libc version: %d.%d (loaded: %s)\n",
+	       __GLIBC__, __GLIBC_MINOR__, gnu_get_libc_version());
+#endif
+#endif
+
+#ifdef _MSC_VER
+/*
+ * See https://msdn.microsoft.com/en-us/library/b0084kay.aspx
+ * Currently, _MSC_BUILD is not reported, but we could convert
+ * _MSC_FULL_VER 150020706 and _MSC_BUILD 1 into a string
+ * "15.00.20706.01".
+ */
+#ifdef _MSC_FULL_VER
+	printf("Microsoft compiler version: %d\n", _MSC_FULL_VER);
+#else
+	printf("Microsoft compiler version: %d\n", _MSC_VER);
+#endif
+#ifdef __CLR_VER
+	puts("Common Language Runtime version: " __CLR_VER);
+#endif
+#endif
+
 #if HAVE_CUDA
 	printf("CUDA library version: %s\n",get_cuda_header_version());
 #endif
@@ -386,8 +436,13 @@ char *get_test(struct fmt_main *format, int ntests)
 		return format->params.tests[ntests].ciphertext;
 }
 
+#ifdef DYNAMIC_DISABLED
+#define dynamic_real_salt_length(format) 0
+#endif
+
 void listconf_parse_late(void)
 {
+#ifndef DYNAMIC_DISABLED
 	if ((options.subformat && !strcasecmp(options.subformat, "list")) ||
 	    (options.listconf && !strcasecmp(options.listconf, "subformats")))
 	{
@@ -396,6 +451,7 @@ void listconf_parse_late(void)
    should have a DISPLAY_ALL_FORMATS() function and we can call them here. */
 		exit(EXIT_SUCCESS);
 	}
+#endif
 
 	if (!strcasecmp(options.listconf, "inc-modes"))
 	{
@@ -493,11 +549,7 @@ void listconf_parse_late(void)
 
 /* Some encodings change max plaintext length when
    encoding is used, or KPC when under OMP */
-			if ((!strstr(format->params.label, "-opencl") &&
-			     !strstr(format->params.label, "-cuda")) ||
-			    (format->params.flags & FMT_UTF8 &&
-			     pers_opts.target_enc != ASCII))
-				fmt_init(format);
+			fmt_init(format);
 
 			if (format->params.tests) {
 				while (format->params.tests[ntests++].ciphertext);
@@ -564,11 +616,7 @@ void listconf_parse_late(void)
 
 /* Some encodings change max plaintext length when encoding is used,
    or KPC when under OMP */
-			if ((!strstr(format->params.label, "-opencl") &&
-			     !strstr(format->params.label, "-cuda")) ||
-			    (format->params.flags & FMT_UTF8 &&
-			     pers_opts.target_enc != ASCII))
-				fmt_init(format);
+			fmt_init(format);
 
 			if (format->params.tests) {
 				while (format->params.tests[ntests++].ciphertext);
@@ -652,9 +700,8 @@ void listconf_parse_late(void)
 		do {
 			int ShowIt = 1, i;
 
-			if (format->params.flags & FMT_DYNAMIC)
 /* required for thin formats, these adjust their methods here */
-				fmt_init(format);
+			fmt_init(format);
 
 			if (options.listconf[14] == '=' || options.listconf[14] == ':') {
 				ShowIt = 0;
@@ -854,11 +901,7 @@ void listconf_parse_late(void)
 			 * support, because some formats (like Raw-MD5u)
 			 * change their tests[] depending on the encoding.
 			 */
-			if ((!strstr(format->params.label, "-opencl") &&
-			     !strstr(format->params.label, "-cuda")) ||
-			    (format->params.flags & FMT_UTF8 &&
-			     pers_opts.target_enc != ASCII))
-				fmt_init(format);
+			fmt_init(format);
 
 			if (format->params.tests) {
 				while (format->params.tests[ntests].ciphertext) {
