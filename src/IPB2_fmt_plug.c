@@ -24,15 +24,19 @@ john_register_one(&fmt_IPB2);
 #include "md5.h"
 #include "common.h"
 #include "formats.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 
 #if defined(_OPENMP)
 #include <omp.h>
 static unsigned int omp_t = 1;
 #ifdef SIMD_COEF_32
+#ifndef OMP_SCALE
 #define OMP_SCALE			512  // Tuned K8-dual HT
+#endif
 #else
+#ifndef OMP_SCALE
 #define OMP_SCALE			256
+#endif
 #endif
 #else
 #define omp_t				1
@@ -60,7 +64,7 @@ static unsigned int omp_t = 1;
 #define CIPHERTEXT_LENGTH		(1 + 4 + 1 + SALT_LENGTH * 2 + 1 + MD5_HEX_SIZE)
 
 #ifdef SIMD_COEF_32
-#define NBKEYS					(SIMD_COEF_32 * MD5_SSE_PARA)
+#define NBKEYS					(SIMD_COEF_32 * SIMD_PARA_MD5)
 #define MIN_KEYS_PER_CRYPT		NBKEYS
 #define MAX_KEYS_PER_CRYPT		NBKEYS
 #define GETPOS(i, index)		( (index&(SIMD_COEF_32-1))*4 + ((i)&60)*SIMD_COEF_32 + ((i)&3) + (unsigned int)index/SIMD_COEF_32*64*SIMD_COEF_32 )
@@ -194,10 +198,10 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	if (ciphertext[16] != '$')
 		return 0;
 
-	if (strspn(ciphertext+6, itoa16) != SALT_LENGTH*2)
+	if (strspn(ciphertext+6, HEXCHARS_lc) != SALT_LENGTH*2)
 		return 0;
 
-	if (strspn(ciphertext+17, itoa16) != MD5_HEX_SIZE)
+	if (strspn(ciphertext+17, HEXCHARS_lc) != MD5_HEX_SIZE)
 		return 0;
 
 	return 1;
@@ -205,7 +209,8 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 static void *get_binary(char *ciphertext)
 {
-	static unsigned char binary_cipher[BINARY_SIZE];
+	static ARCH_WORD_32 out[BINARY_SIZE/4];
+	unsigned char *binary_cipher = (unsigned char*)out;
 	int i;
 
 	ciphertext += 17;
@@ -214,7 +219,7 @@ static void *get_binary(char *ciphertext)
 			(atoi16[ARCH_INDEX(ciphertext[i*2])] << 4)
 			+ atoi16[ARCH_INDEX(ciphertext[i*2+1])];
 
-	return (void *)binary_cipher;
+	return (void*)out;
 }
 
 static void *get_salt(char *ciphertext)
@@ -365,7 +370,7 @@ key_cleaning:
 			keybuffer[14*SIMD_COEF_32] = len << 3;
 		}
 
-		SSEmd5body(&key_buf[t*NBKEYS*64], (unsigned int*)&crypt_key[t*NBKEYS*16], NULL, SSEi_MIXED_IN);
+		SIMDmd5body(&key_buf[t*NBKEYS*64], (unsigned int*)&crypt_key[t*NBKEYS*16], NULL, SSEi_MIXED_IN);
 		for (index = 0; index < NBKEYS; index++) {
 			// Somehow when I optimised this it got faster in Valgrind but slower IRL
 			for (i = 0; i < BINARY_SIZE; i++) {
@@ -375,8 +380,8 @@ key_cleaning:
 			}
 		}
 
-		SSEmd5body(&saved_key[t*NBKEYS*64], (unsigned int*)&crypt_key[t*NBKEYS*16], NULL, SSEi_MIXED_IN);
-		SSEmd5body(empty_key, (unsigned int*)&crypt_key[t*NBKEYS*16], (unsigned int*)&crypt_key[t*NBKEYS*16], SSEi_RELOAD|SSEi_MIXED_IN);
+		SIMDmd5body(&saved_key[t*NBKEYS*64], (unsigned int*)&crypt_key[t*NBKEYS*16], NULL, SSEi_MIXED_IN);
+		SIMDmd5body(empty_key, (unsigned int*)&crypt_key[t*NBKEYS*16], (unsigned int*)&crypt_key[t*NBKEYS*16], SSEi_RELOAD|SSEi_MIXED_IN);
 	}
 	//dump_stuff_mmx_msg("\nfinal ", saved_key, 64, count-1);
 	//dump_out_mmx_msg("result", crypt_key, 16, count-1);
@@ -407,9 +412,9 @@ static int cmp_all(void *binary, int count) {
 #ifdef SIMD_COEF_32
 	unsigned int x,y=0;
 #ifdef _OPENMP
-	for(;y<MD5_SSE_PARA*omp_t;y++)
+	for(;y<SIMD_PARA_MD5*omp_t;y++)
 #else
-	for(;y<MD5_SSE_PARA;y++)
+	for(;y<SIMD_PARA_MD5;y++)
 #endif
 		for(x = 0; x < SIMD_COEF_32; x++)
 		{
@@ -448,21 +453,21 @@ static int cmp_one(void * binary, int index)
 
 #ifdef SIMD_COEF_32
 #define HASH_OFFSET (index&(SIMD_COEF_32-1))+((unsigned int)index/SIMD_COEF_32)*SIMD_COEF_32*4
-static int get_hash_0(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xf; }
-static int get_hash_1(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xff; }
-static int get_hash_2(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xfff; }
-static int get_hash_3(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xffff; }
-static int get_hash_4(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xfffff; }
-static int get_hash_5(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xffffff; }
-static int get_hash_6(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0x7ffffff; }
+static int get_hash_0(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_0; }
+static int get_hash_1(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_1; }
+static int get_hash_2(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_2; }
+static int get_hash_3(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_3; }
+static int get_hash_4(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_4; }
+static int get_hash_5(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_5; }
+static int get_hash_6(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_6; }
 #else
-static int get_hash_0(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xF; }
-static int get_hash_1(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFF; }
-static int get_hash_2(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFF; }
-static int get_hash_3(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFF; }
-static int get_hash_4(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFFF; }
-static int get_hash_5(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFFFF; }
-static int get_hash_6(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0x7FFFFFF; }
+static int get_hash_0(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_0; }
+static int get_hash_1(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_1; }
+static int get_hash_2(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_2; }
+static int get_hash_3(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_3; }
+static int get_hash_4(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_4; }
+static int get_hash_5(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_5; }
+static int get_hash_6(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_6; }
 #endif
 
 static int salt_hash(void *salt)
@@ -486,9 +491,7 @@ struct fmt_main fmt_IPB2 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	},
 	{
@@ -500,9 +503,7 @@ struct fmt_main fmt_IPB2 = {
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

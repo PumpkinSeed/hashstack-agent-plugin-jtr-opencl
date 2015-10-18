@@ -1,7 +1,9 @@
-/* DMG cracker patch for JtR. Hacked together during August of 2012
+/*
+ * DMG cracker patch for JtR. Hacked together during August of 2012
  * by Dhiru Kholia <dhiru.kholia at gmail.com>
  *
  * This software is Copyright (c) 2012 Lukas Odzioba <ukasz@openwall.net>
+ * Copyright (c) 2015, magnum
  * and it is hereby released to the general public under the following terms:
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted. */
@@ -26,16 +28,21 @@ john_register_one(&fmt_opencl_dmg);
 #else
 
 #include <string.h>
-#include <openssl/aes.h>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
+#include <openssl/des.h>
+#include "aes.h"
+#include "hmac_sha.h"
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
+#ifdef DMG_DEBUG
+#define NEED_OS_FLOCK
+#include "os.h"
+#endif
 #include "arch.h"
 #include "formats.h"
 #include "common.h"
+#include "stdint.h"
 #include "options.h"
 #include "jumbo.h"
 #include "common-opencl.h"
@@ -59,10 +66,6 @@ john_register_one(&fmt_opencl_dmg);
 		((((unsigned long)(n) & 0xFF0000)) >> 8) | \
 		((((unsigned long)(n) & 0xFF000000)) >> 24))
 
-#define uint8_t			unsigned char
-#define uint16_t		unsigned short
-#define uint32_t		unsigned int
-
 #ifdef DMG_DEBUG
 	extern volatile int bench_running;
 #endif
@@ -77,10 +80,10 @@ typedef struct {
 } dmg_hash;
 
 typedef struct {
-	uint8_t length;
-	uint8_t salt[20];
 	int iterations;
 	int outlen;
+	uint8_t length;
+	uint8_t salt[20];
 } dmg_salt;
 
 static int *cracked;
@@ -195,9 +198,6 @@ static struct fmt_tests dmg_tests[] = {
 	{NULL}
 };
 
-#define MIN(a, b)               (((a) > (b)) ? (b) : (a))
-#define MAX(a, b)               (((a) > (b)) ? (a) : (b))
-
 #define STEP			0
 #define SEED			256
 
@@ -213,20 +213,6 @@ static const char * warn[] = {
 static size_t get_task_max_work_group_size()
 {
 	return autotune_get_task_max_work_group_size(FALSE, 0, crypt_kernel);
-}
-
-static size_t get_task_max_size()
-{
-	return 0;
-}
-
-static size_t get_default_workgroup()
-{
-	if (cpu(device_info[gpu_id]))
-		return get_platform_vendor_id(platform_id) == DEV_INTEL ?
-			8 : 1;
-	else
-		return 64;
 }
 
 static void create_clobj(size_t gws, struct fmt_main *self)
@@ -264,44 +250,51 @@ static void create_clobj(size_t gws, struct fmt_main *self)
 
 static void release_clobj(void)
 {
-	HANDLE_CLERROR(clReleaseMemObject(mem_in), "Release mem in");
-	HANDLE_CLERROR(clReleaseMemObject(mem_setting), "Release mem setting");
-	HANDLE_CLERROR(clReleaseMemObject(mem_out), "Release mem out");
+	if (cracked) {
+		HANDLE_CLERROR(clReleaseMemObject(mem_in), "Release mem in");
+		HANDLE_CLERROR(clReleaseMemObject(mem_setting), "Release mem setting");
+		HANDLE_CLERROR(clReleaseMemObject(mem_out), "Release mem out");
 
-	MEM_FREE(inbuffer);
-	MEM_FREE(outbuffer);
-	MEM_FREE(cracked);
+		MEM_FREE(inbuffer);
+		MEM_FREE(outbuffer);
+		MEM_FREE(cracked);
+	}
 }
 
 static void done(void)
 {
-	release_clobj();
+	if (autotuned) {
+		release_clobj();
 
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+		HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
+		HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+
+		autotuned--;
+	}
 }
 
 static void init(struct fmt_main *_self)
 {
-	char build_opts[64];
-
 	self = _self;
-
-	snprintf(build_opts, sizeof(build_opts),
-	         "-DKEYLEN=%d -DSALTLEN=%d -DOUTLEN=%d",
-	         PLAINTEXT_LENGTH,
-	         (int)sizeof(currentsalt.salt),
-	         (int)sizeof(outbuffer->v));
-	opencl_init("$JOHN/kernels/pbkdf2_hmac_sha1_unsplit_kernel.cl",
-	                gpu_id, build_opts);
-
-	crypt_kernel = clCreateKernel(program[gpu_id], "derive_key", &cl_error);
-	HANDLE_CLERROR(cl_error, "Error creating kernel");
+	opencl_prepare_dev(gpu_id);
 }
 
 static void reset(struct db_main *db)
 {
-	if (!db) {
+	if (!autotuned) {
+		char build_opts[64];
+
+		snprintf(build_opts, sizeof(build_opts),
+		         "-DKEYLEN=%d -DSALTLEN=%d -DOUTLEN=%d",
+		         PLAINTEXT_LENGTH,
+		         (int)sizeof(currentsalt.salt),
+		         (int)sizeof(outbuffer->v));
+		opencl_init("$JOHN/kernels/pbkdf2_hmac_sha1_unsplit_kernel.cl",
+		            gpu_id, build_opts);
+
+		crypt_kernel = clCreateKernel(program[gpu_id], "derive_key", &cl_error);
+		HANDLE_CLERROR(cl_error, "Error creating kernel");
+
 		// Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 1, self,
 		                       create_clobj, release_clobj,
@@ -330,45 +323,56 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	if (headerver == 2) {
 		if ((p = strtokm(NULL, "*")) == NULL)	/* salt len */
 			goto err;
+		if(!isdec(p))
+			goto err;
 		res = atoi(p);
 		if (res > 20)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* salt */
 			goto err;
-		if (strlen(p) != res * 2)
+		if (hexlenl(p) != res*2)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* ivlen */
+			goto err;
+		if(!isdec(p))
 			goto err;
 		res = atoi(p);
 		if (atoi(p) > 32)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* iv */
 			goto err;
-		if (strlen(p) != res * 2)
+		if (hexlenl(p) != res*2)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* encrypted_keyblob_size */
+			goto err;
+		if(!isdec(p))
 			goto err;
 		res = atoi(p);
 		if (res > 128)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* encrypted keyblob */
 			goto err;
-		if (strlen(p) != res * 2)
+		if (hexlenl(p) != res*2)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* chunk number */
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* data_size */
 			goto err;
+		if(!isdec(p))
+			goto err;
 		res = atoi(p);
 		if ((p = strtokm(NULL, "*")) == NULL)	/* chunk */
 			goto err;
-		if (strlen(p) != res * 2)
+		if (hexlenl(p) != res*2)
 			goto err;
 		if (res > 8192)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* scp */
 			goto err;
+		if(!isdec(p))
+			goto err;
 		res = atoi(p);
+		/* FIXME: which values are allowed here? */
 		if (res == 1) {
 			if ((p = strtokm(NULL, "*")) == NULL)	/* zchunk */
 				goto err;
@@ -379,30 +383,36 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	else if (headerver == 1) {
 		if ((p = strtokm(NULL, "*")) == NULL)	/* salt len */
 			goto err;
+		if(!isdec(p))
+			goto err;
 		res = atoi(p);
 		if (res > 20)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* salt */
 			goto err;
-		if (strlen(p) != res * 2)
+		if (hexlenl(p) != res*2)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* len_wrapped_aes_key */
+			goto err;
+		if(!isdec(p))
 			goto err;
 		res = atoi(p);
 		if (res > 296)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* wrapped_aes_key  */
 			goto err;
-		if (strlen(p) != res * 2)
+		if (hexlenl(p) != res*2)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* len_hmac_sha1_key */
+			goto err;
+		if(!isdec(p))
 			goto err;
 		res = atoi(p);
 		if (res > 300)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* hmac_sha1_key */
 			goto err;
-		if (strlen(p) != res * 2)
+		if (strlen(p) / 2 != res)
 			goto err;
 	}
 	else
@@ -527,42 +537,36 @@ static char *get_key(int index)
 	return ret;
 }
 
-static int apple_des3_ede_unwrap_key1(unsigned char *wrapped_key, int wrapped_key_len, unsigned char *decryptKey)
+static int apple_des3_ede_unwrap_key1(const unsigned char *wrapped_key, const int wrapped_key_len, const unsigned char *decryptKey)
 {
-	EVP_CIPHER_CTX ctx;
+	DES_key_schedule ks1, ks2, ks3;
 	unsigned char TEMP1[sizeof(cur_salt->wrapped_hmac_sha1_key)];
 	unsigned char TEMP2[sizeof(cur_salt->wrapped_hmac_sha1_key)];
-	unsigned char CEKICV[sizeof(cur_salt->wrapped_hmac_sha1_key)];
 	unsigned char IV[8] = { 0x4a, 0xdd, 0xa2, 0x2c, 0x79, 0xe8, 0x21, 0x05 };
-	int outlen, tmplen, i;
+	int outlen, i;
 
-	EVP_CIPHER_CTX_init(&ctx);
-	EVP_DecryptInit_ex(&ctx, EVP_des_ede3_cbc(), NULL, decryptKey, IV);
-	if (!EVP_DecryptUpdate(&ctx, TEMP1, &outlen, wrapped_key, wrapped_key_len)) {
-		goto err;
-	}
-	if (!EVP_DecryptFinal_ex(&ctx, TEMP1 + outlen, &tmplen)) {
-		goto err;
-	}
-	outlen += tmplen;
-	EVP_CIPHER_CTX_cleanup(&ctx);
-	for (i = 0; i < outlen; i++) {
+	DES_set_key((DES_cblock*)(decryptKey +  0), &ks1);
+	DES_set_key((DES_cblock*)(decryptKey +  8), &ks2);
+	DES_set_key((DES_cblock*)(decryptKey + 16), &ks3);
+	DES_ede3_cbc_encrypt(wrapped_key, TEMP1, wrapped_key_len, &ks1, &ks2, &ks3,
+	                     (DES_cblock*)IV, DES_DECRYPT);
+
+	outlen = check_pkcs_pad(TEMP1, wrapped_key_len, 8);
+	if (outlen < 0)
+		return 0;
+
+	for (i = 0; i < outlen; i++)
 		TEMP2[i] = TEMP1[outlen - i - 1];
-	}
-	EVP_CIPHER_CTX_init(&ctx);
-	EVP_DecryptInit_ex(&ctx, EVP_des_ede3_cbc(), NULL, decryptKey, TEMP2);
-	if (!EVP_DecryptUpdate(&ctx, CEKICV, &outlen, TEMP2 + 8, outlen - 8)) {
-		goto err;
-	}
-	if (!EVP_DecryptFinal_ex(&ctx, CEKICV + outlen, &tmplen)) {
-		goto err;
-	}
-	outlen += tmplen;
-	EVP_CIPHER_CTX_cleanup(&ctx);
-	return 0;
-err:
-	EVP_CIPHER_CTX_cleanup(&ctx);
-	return -1;
+
+	outlen -= 8;
+	DES_ede3_cbc_encrypt(TEMP2 + 8, TEMP1, outlen, &ks1, &ks2, &ks3,
+	                     (DES_cblock*)TEMP2, DES_DECRYPT);
+
+	outlen = check_pkcs_pad(TEMP1, outlen, 8);
+	if (outlen < 0)
+		return 0;
+
+	return 1;
 }
 
 static int hash_plugin_check_hash(unsigned char *derived_key)
@@ -572,41 +576,34 @@ static int hash_plugin_check_hash(unsigned char *derived_key)
 	int ret = 0;
 
 	if (cur_salt->headerver == 1) {
-		if ((apple_des3_ede_unwrap_key1(cur_salt->wrapped_aes_key, cur_salt->len_wrapped_aes_key, derived_key) == 0) && (apple_des3_ede_unwrap_key1(cur_salt->wrapped_hmac_sha1_key, cur_salt->len_hmac_sha1_key, derived_key) == 0)) {
+		if (apple_des3_ede_unwrap_key1(cur_salt->wrapped_aes_key, cur_salt->len_wrapped_aes_key, derived_key) &&
+		    apple_des3_ede_unwrap_key1(cur_salt->wrapped_hmac_sha1_key, cur_salt->len_hmac_sha1_key, derived_key)) {
 			return 1;
 		}
 	}
 	else {
-		EVP_CIPHER_CTX ctx;
+		DES_key_schedule ks1, ks2, ks3;
 		unsigned char TEMP1[sizeof(cur_salt->wrapped_hmac_sha1_key)];
-		int outlen, tmplen;
 		AES_KEY aes_decrypt_key;
 		unsigned char outbuf[8192 + 1];
 		unsigned char outbuf2[4096 + 1];
 		unsigned char iv[20];
-		HMAC_CTX hmacsha1_ctx;
-		int mdlen;
 #ifdef DMG_DEBUG
 		unsigned char *r;
 #endif
 		const char nulls[8] = { 0 };
 
-		EVP_CIPHER_CTX_init(&ctx);
-		EVP_DecryptInit_ex(&ctx, EVP_des_ede3_cbc(), NULL, derived_key, cur_salt->iv);
-		if (!EVP_DecryptUpdate(&ctx, TEMP1, &outlen,
-		    cur_salt->encrypted_keyblob, cur_salt->encrypted_keyblob_size)) {
-			return 0;
-		}
-		EVP_DecryptFinal_ex(&ctx, TEMP1 + outlen, &tmplen);
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		outlen += tmplen;
+		DES_set_key((DES_cblock*)(derived_key +  0), &ks1);
+		DES_set_key((DES_cblock*)(derived_key +  8), &ks2);
+		DES_set_key((DES_cblock*)(derived_key + 16), &ks3);
+		memcpy(iv, cur_salt->iv, 8);
+		DES_ede3_cbc_encrypt(cur_salt->encrypted_keyblob, TEMP1,
+		                     cur_salt->encrypted_keyblob_size, &ks1, &ks2, &ks3,
+		                     (DES_cblock*)iv, DES_DECRYPT);
+
 		memcpy(aes_key_, TEMP1, 32);
 		memcpy(hmacsha1_key_, TEMP1, 20);
-		HMAC_CTX_init(&hmacsha1_ctx);
-		HMAC_Init_ex(&hmacsha1_ctx, hmacsha1_key_, 20, EVP_sha1(), NULL);
-		HMAC_Update(&hmacsha1_ctx, (void *) &cur_salt->cno, 4);
-		HMAC_Final(&hmacsha1_ctx, iv, (unsigned int *) &mdlen);
-		HMAC_CTX_cleanup(&hmacsha1_ctx);
+		hmac_sha1(hmacsha1_key_, 20, (unsigned char*)&cur_salt->cno, 4, iv, 20);
 		if (cur_salt->encrypted_keyblob_size == 48)
 			AES_set_decrypt_key(aes_key_, 128, &aes_decrypt_key);
 		else
@@ -671,11 +668,7 @@ static int hash_plugin_check_hash(unsigned char *derived_key)
 		if (cur_salt->scp == 1) {
 			int cno = 0;
 
-			HMAC_CTX_init(&hmacsha1_ctx);
-			HMAC_Init_ex(&hmacsha1_ctx, hmacsha1_key_, 20, EVP_sha1(), NULL);
-			HMAC_Update(&hmacsha1_ctx, (void *) &cno, 4);
-			HMAC_Final(&hmacsha1_ctx, iv, (unsigned int *) &mdlen);
-			HMAC_CTX_cleanup(&hmacsha1_ctx);
+			hmac_sha1(hmacsha1_key_, 20, (unsigned char*)&cno, 4, iv, 20);
 			if (cur_salt->encrypted_keyblob_size == 48)
 				AES_set_decrypt_key(aes_key_, 128, &aes_decrypt_key);
 			else
@@ -700,7 +693,6 @@ static int hash_plugin_check_hash(unsigned char *derived_key)
 #endif /* DMG_DEBUG */
 		}
 
-
 #ifdef DMG_DEBUG
 		/* Write block as hex, strings or raw to a file. */
 		if (ret && !bench_running) {
@@ -710,8 +702,20 @@ static int hash_plugin_check_hash(unsigned char *derived_key)
 			if ((fd = open("dmg.debug.main", O_RDWR | O_CREAT | O_TRUNC, 0660)) == -1)
 				perror("open()");
 			else {
-				if (flock(fd, LOCK_EX))
-					perror("flock()");
+#if FCNTL_LOCKS
+				struct flock lock = { 0 };
+
+				lock.l_type = F_WRLCK;
+				while (fcntl(fd, F_SETLKW, &lock)) {
+					if (errno != EINTR)
+						pexit("fcntl(F_WRLCK)");
+				}
+#elif OS_FLOCK
+				while (flock(fd, LOCK_EX)) {
+					if (errno != EINTR)
+						pexit("flock(LOCK_EX)");
+				}
+#endif
 				if ((write(fd, outbuf, cur_salt->data_size) == -1))
 					perror("write()");
 				if (cur_salt->scp == 1)
@@ -748,7 +752,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	int index;
 	size_t *lws = local_work_size ? &local_work_size : NULL;
 
-	global_work_size = local_work_size ? (count + local_work_size - 1) / local_work_size * local_work_size : count;
+	global_work_size = GET_MULTIPLE_OR_BIGGER(count, local_work_size);
 
 	if (any_cracked) {
 		memset(cracked, 0, cracked_size);
@@ -756,18 +760,21 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	}
 
 	/// Copy data to gpu
-	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], mem_in, CL_FALSE, 0,
+	BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], mem_in, CL_FALSE, 0,
 		insize, inbuffer, 0, NULL, multi_profilingEvent[0]),
 	        "Copy data to gpu");
 
 	/// Run kernel
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1,
+	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1,
 		NULL, &global_work_size, lws, 0, NULL,
 	        multi_profilingEvent[1]), "Run kernel");
 
 	/// Read the result back
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], mem_out, CL_TRUE, 0,
+	BENCH_CLERROR(clEnqueueReadBuffer(queue[gpu_id], mem_out, CL_TRUE, 0,
 		outsize, outbuffer, 0, NULL, multi_profilingEvent[2]), "Copy result back");
+
+	if (ocl_autotune_running)
+		return count;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -800,7 +807,6 @@ static int cmp_exact(char *source, int index)
 	return 1;
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int iteration_count(void *salt)
 {
 	struct custom_salt *my_salt;
@@ -808,7 +814,6 @@ static unsigned int iteration_count(void *salt)
 	my_salt = salt;
 	return (unsigned int) my_salt->iterations;
 }
-#endif
 
 struct fmt_main fmt_opencl_dmg = {
 	{
@@ -828,12 +833,13 @@ struct fmt_main fmt_opencl_dmg = {
 #ifdef DMG_DEBUG
 		FMT_NOT_EXACT |
 #endif
-		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
+#ifdef _OPENMP
+		FMT_OMP |
+#endif
+		FMT_CASE | FMT_8_BIT,
 		{
 			"iteration count",
 		},
-#endif
 		dmg_tests
 	}, {
 		init,
@@ -844,11 +850,9 @@ struct fmt_main fmt_opencl_dmg = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

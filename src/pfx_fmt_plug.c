@@ -11,6 +11,9 @@
  * keytool -genkeypair -alias my_certificate -keystore my_keystore.pfx -storepass
  * my_password -validity 365 -keyalg RSA -keysize 2048 -storetype pkcs12 */
 
+#include "arch.h"
+#if !AC_BUILT || HAVE_BIO_NEW
+
 #if FMT_EXTERNS_H
 extern struct fmt_main fmt_pfx;
 #elif FMT_REGISTERS_H
@@ -30,11 +33,12 @@ john_register_one(&fmt_pfx);
 #include "options.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               2 // tuned on core i7
+#endif
 //#define OMP_SCALE              32 // tuned on K8-dual HT  (20% faster)
 #endif
 #include <string.h>
-#include "arch.h"
 #include "common.h"
 #include "formats.h"
 #include "params.h"
@@ -78,6 +82,12 @@ static struct fmt_tests pfx_tests[] = {
 	{NULL}
 };
 
+struct pkcs12_list {
+	struct pkcs12_list *next;
+	PKCS12 *p12;
+};
+static struct pkcs12_list *pList;
+
 struct fmt_main fmt_pfx;
 
 static void init(struct fmt_main *self)
@@ -117,6 +127,12 @@ static void done(void)
 {
 	MEM_FREE(cracked);
 	MEM_FREE(saved_key);
+	while (pList) {
+		struct pkcs12_list *p = pList;
+		PKCS12_free(pList->p12);
+		pList = pList->next;
+		MEM_FREE(p);
+	}
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -137,7 +153,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	len = atoi(p);
 	if ((p = strtokm(NULL, "*")) == NULL)	/* data */
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 	if(strlen(p) != len * 2)
 		goto err;
@@ -152,7 +168,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	BIO_write(bp, decoded, len);
 	if(!(p12 = d2i_PKCS12_bio(bp, NULL)))
 		goto err;
-
+	PKCS12_free(p12);
 	if (bp)	BIO_free(bp);
 	MEM_FREE(decoded);
 	MEM_FREE(keeptr);
@@ -203,6 +219,19 @@ static void *get_salt(char *ciphertext)
 	}
 	/* save custom_salt information */
 	memcpy(&(psalt->pfx), p12, sizeof(PKCS12));
+
+	/* we can NOT release memory here, or the function will not work */
+	//PKCS12_free(p12);
+	if (!pList) {
+		pList = mem_calloc(sizeof(*pList), sizeof(pList));
+		pList->p12 = p12;
+	} else {
+		struct pkcs12_list *p = mem_calloc(sizeof(*pList), sizeof(pList));
+		p->next = pList;
+		pList = p;
+		pList->p12 = p12;
+	}
+
 	BIO_free(bp);
 	MEM_FREE(decoded_data);
 	MEM_FREE(keeptr);
@@ -295,9 +324,7 @@ struct fmt_main fmt_pfx = {
 		FMT_OMP |
 #endif
 		FMT_CASE | FMT_8_BIT | FMT_DYNA_SALT,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		pfx_tests
 	}, {
 		init,
@@ -308,9 +335,7 @@ struct fmt_main fmt_pfx = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash
@@ -332,3 +357,4 @@ struct fmt_main fmt_pfx = {
 };
 
 #endif /* plugin stanza */
+#endif /* HAVE_BIO_NEW */

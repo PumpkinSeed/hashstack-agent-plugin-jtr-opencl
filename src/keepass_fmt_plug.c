@@ -27,11 +27,13 @@ john_register_one(&fmt_KeePass);
 #include "formats.h"
 #include "params.h"
 #include "options.h"
-#include "aes/aes.h"
+#include "aes.h"
 #include "twofish.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               1
+#endif
 #endif
 #include "memdbg.h"
 
@@ -40,12 +42,17 @@ john_register_one(&fmt_KeePass);
 #define ALGORITHM_NAME		"SHA256 AES 32/" ARCH_BITS_STR " " SHA2_LIB
 #define BENCHMARK_COMMENT	""
 #define BENCHMARK_LENGTH	-1
-#define PLAINTEXT_LENGTH	32
+#define PLAINTEXT_LENGTH	125
 #define BINARY_SIZE		0
 #define BINARY_ALIGN		MEM_ALIGN_NONE
 #define SALT_SIZE		sizeof(struct custom_salt)
-// salt align of 4 was crashing on sparc.  Probably due to the long long value.
+#if ARCH_ALLOWS_UNALIGNED
+// Avoid a compiler bug, see #1284
+#define SALT_ALIGN		1
+#else
+// salt align of 4 was crashing on sparc due to the long long value.
 #define SALT_ALIGN		sizeof(long long)
+#endif
 #define MIN_KEYS_PER_CRYPT	1
 #define MAX_KEYS_PER_CRYPT	1
 
@@ -66,8 +73,8 @@ static int any_cracked, *cracked;
 static size_t cracked_size;
 
 static struct custom_salt {
-	int version;
 	long long offset;
+	int version;
 	int isinline;
 	int keyfilesize;
 	int have_keyfile;
@@ -197,49 +204,40 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	ctcopy += 10;
 	if ((p = strtokm(ctcopy, "*")) == NULL)	/* version */
 		goto err;
-	if (strlen(p) != 1)
+	if (!isdec(p))
 		goto err;
 	version = atoi(p);
 	if (version != 1 && version != 2)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* rounds */
 		goto err;
-	if (strlen(p) > 10)
+	if (!isdec(p))
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* offset */
 		goto err;
-	if (strlen(p) > 10)
+	if (!isdec(p))
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* final random seed */
 		goto err;
-	res = strlen(p);
+	res = hexlenl(p);
 	if (res != 32 && res != 64)
-		goto err;
-	if (!ishex(p))
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* transf random seed */
 		goto err;
-	res = strlen(p);
-	if (res != 64)
-		goto err;
-	if (!ishex(p))
+	if (hexlenl(p) != 64)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* env_iv */
 		goto err;
-	res = strlen(p);
-	if (res != 32)
-		goto err;
-	if (!ishex(p))
+	if (hexlenl(p) != 32)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* hash or expected bytes*/
 		goto err;
-	res = strlen(p);
-	if (res != 64)
-		goto err;
-	if (!ishex(p))
+	if (hexlenl(p) != 64)
 		goto err;
 	if (version == 1) {
 		if ((p = strtokm(NULL, "*")) == NULL)	/* inline flag */
+			goto err;
+		if(!isdec(p))
 			goto err;
 		res = atoi(p);
 		if (res != 1 && res != 2) {
@@ -248,37 +246,36 @@ static int valid(char *ciphertext, struct fmt_main *self)
 			fprintf(stderr, "See https://github.com/magnumripper/JohnTheRipper/issues/1026\n");
 			error();
 		}
-		if ((p = strtokm(NULL, "*")) == NULL)	/* content size */
-			goto err;
-		contentsize = atoi(p);
-		if ((p = strtokm(NULL, "*")) == NULL)	/* content */
-			goto err;
-		res = strlen(p);
-		if (res != contentsize * 2)
-			goto err;
-		if (!ishex(p))
-			goto err;
+		if (res == 1) {
+			if ((p = strtokm(NULL, "*")) == NULL)	/* content size */
+				goto err;
+			if (!isdec(p))
+				goto err;
+			contentsize = atoi(p);
+			if ((p = strtokm(NULL, "*")) == NULL)	/* content */
+				goto err;
+			if (hexlenl(p) / 2 != contentsize)
+				goto err;
+			p = strtokm(NULL, "*");
+			if (p)
+				goto err;
+		}
 		p = strtokm(NULL, "*");
 		if (p) {
 			// keyfile handling
 			if ((p = strtokm(NULL, "*")) == NULL)
 				goto err;
-			res = strlen(p);
+			res = hexlenl(p);
 			if ((p = strtokm(NULL, "*")) == NULL)
 				goto err;
-			if (res != 32 || strlen(p) != 64)
-				goto err;
-			if (!ishex(p))
+			if (res != 32 || hexlenl(p) != 64)
 				goto err;
 		}
 	}
 	else {
 		if ((p = strtokm(NULL, "*")) == NULL)	/* content */
 			goto err;
-		res = strlen(p);
-		if (res != 64)
-			goto err;
-		if (!ishex(p))
+		if (hexlenl(p) != 64)
 			goto err;
 	}
 
@@ -502,7 +499,6 @@ static char *get_key(int index)
 	return saved_key[index];
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int iteration_count(void *salt)
 {
 	struct custom_salt *my_salt;
@@ -522,7 +518,6 @@ static unsigned int keepass_version(void *salt)
 	my_salt = salt;
 	return (unsigned int) my_salt->version;
 }
-#endif
 struct fmt_main fmt_KeePass = {
 	{
 		FORMAT_LABEL,
@@ -539,12 +534,10 @@ struct fmt_main fmt_KeePass = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 			"version",
 		},
-#endif
 		KeePass_tests
 	}, {
 		init,
@@ -555,12 +548,10 @@ struct fmt_main fmt_KeePass = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 			keepass_version,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

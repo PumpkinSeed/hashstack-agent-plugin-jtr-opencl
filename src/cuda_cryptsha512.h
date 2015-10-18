@@ -10,21 +10,11 @@
 #include "stdint.h"
 #include <stdbool.h>
 
-#ifdef __APPLE__
-#include "stdint.h"
-#else
-#define uint8_t  unsigned char
-#define uint32_t unsigned int
-#define uint64_t unsigned long long int
-#endif
-
 #define BLOCKS 14
 #define THREADS 128//set 256 on fermi
 
 #define KEYS_PER_CRYPT BLOCKS*THREADS
 
-#define MAX(x,y) ((x) > (y) ? (x) : (y))
-#define MIN(x,y) ((x) < (y) ? (x) : (y))
 #define SALT_LEN_MAX 16
 #define ROUNDS_DEFAULT 5000
 #define ROUNDS_MIN 1	/* Drepper has it as 1000 */
@@ -36,8 +26,8 @@ static const char sha256_rounds_prefix[] = "rounds=";
 
 #define rol(x,n) ((x << n) | (x >> (64-n)))
 #define ror(x,n) ((x >> n) | (x << (64-n)))
-#define Ch(x,y,z) ((x & y) ^ ( (~x) & z))
-#define Maj(x,y,z) ((x & y) ^ (x & z) ^ (y & z))
+#define Ch(x, y, z) (z ^ (x & (y ^ z)))
+#define Maj(x, y, z) ((x & y) | (z & (x | y)))
 #define Sigma0(x) ((ror(x,28))  ^ (ror(x,34)) ^ (ror(x,39)))
 #define Sigma1(x) ((ror(x,14))  ^ (ror(x,18)) ^ (ror(x,41)))
 #define sigma0(x) ((ror(x,1))  ^ (ror(x,8)) ^(x>>7))

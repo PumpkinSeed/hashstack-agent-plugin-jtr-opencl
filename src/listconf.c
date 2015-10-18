@@ -36,6 +36,7 @@
 #include <openssl/crypto.h>
 
 #include "arch.h"
+#include "simd-intrinsics.h"
 #include "jumbo.h"
 #include "params.h"
 #include "path.h"
@@ -43,6 +44,7 @@
 #include "options.h"
 #include "unicode.h"
 #include "dynamic.h"
+#include "dynamic_types.h"
 #include "config.h"
 
 #if HAVE_LIBGMP
@@ -72,41 +74,9 @@ extern void cuda_device_list();
 #if HAVE_OPENCL
 #include "common-opencl.h"
 #endif
+#include "version.h"
+#include "listconf.h" /* must be included after version.h */
 #include "memdbg.h"
-
-#if HAVE_MPI
-#ifdef _OPENMP
-#define _MP_VERSION " MPI + OMP"
-#else
-#define _MP_VERSION " MPI"
-#endif
-#else
-#ifdef _OPENMP
-#define _MP_VERSION "_omp"
-#else
-#define _MP_VERSION ""
-#endif
-#endif
-#ifdef DEBUG
-#define DEBUG_STRING "_dbg"
-#else
-#define DEBUG_STRING ""
-#endif
-#ifdef WITH_ASAN
-#define ASAN_STRING "_asan"
-#else
-#define ASAN_STRING ""
-#endif
-#if defined(MEMDBG_ON) && defined(MEMDBG_EXTRA_CHECKS)
-#define MEMDBG_STRING "_memdbg-ex"
-#elif defined(MEMDBG_ON)
-#define MEMDBG_STRING "_memdbg"
-#else
-#define MEMDBG_STRING ""
-#endif
-
-#define _STR_VALUE(arg)			#arg
-#define STR_MACRO(n)			_STR_VALUE(n)
 
 /*
  * FIXME: Should all the listconf_list_*() functions get an additional stream
@@ -144,11 +114,7 @@ static void listconf_list_help_options()
 
 static void listconf_list_method_names()
 {
-#if FMT_MAIN_VERSION > 11
 	puts("init, done, reset, prepare, valid, split, binary, salt, tunable_cost_value,");
-#else
-	puts("init, done, reset, prepare, valid, split, binary, salt,");
-#endif
 	puts("source, binary_hash, salt_hash, salt_compare, set_salt, set_key, get_key,");
 	puts("clear_keys, crypt_all, get_hash, cmp_all, cmp_one, cmp_exact");
 }
@@ -159,13 +125,14 @@ static void listconf_list_build_info(void)
 #ifdef __GNU_MP_VERSION
 	int gmp_major, gmp_minor, gmp_patchlevel;
 #endif
-	puts("Version: " JOHN_VERSION _MP_VERSION DEBUG_STRING MEMDBG_STRING ASAN_STRING);
-	puts("Build: " JOHN_BLD);
-#ifdef __TIMESTAMP__
-	puts("Time stamp: " __TIMESTAMP__);
+	puts("Version: " JTR_GIT_VERSION);
+	puts("Build: " JOHN_BLD _MP_VERSION DEBUG_STRING MEMDBG_STRING ASAN_STRING UBSAN_STRING);
+#ifdef SIMD_COEF_32
+	printf("SIMD: %s, interleaving: MD4:%d MD5:%d SHA1:%d SHA256:%d SHA512:%d\n",
+	       SIMD_TYPE,
+	       SIMD_PARA_MD4, SIMD_PARA_MD5, SIMD_PARA_SHA1,
+	       SIMD_PARA_SHA256, SIMD_PARA_SHA512);
 #endif
-	printf("Arch: %d-bit %s\n", ARCH_BITS,
-	       ARCH_LITTLE_ENDIAN ? "LE" : "BE");
 #if JOHN_SYSTEMWIDE
 	puts("System-wide exec: " JOHN_SYSTEMWIDE_EXEC);
 	puts("System-wide home: " JOHN_SYSTEMWIDE_HOME);
@@ -173,45 +140,28 @@ static void listconf_list_build_info(void)
 #endif
 	printf("$JOHN is %s\n", path_expand("$JOHN/"));
 	printf("Format interface version: %d\n", FMT_MAIN_VERSION);
-#if FMT_MAIN_VERSION > 11
 	printf("Max. number of reported tunable costs: %d\n", FMT_TUNABLE_COSTS);
-#endif
 	puts("Rec file version: " RECOVERY_V);
 	puts("Charset file version: " CHARSET_V);
 	printf("CHARSET_MIN: %d (0x%02x)\n", CHARSET_MIN, CHARSET_MIN);
 	printf("CHARSET_MAX: %d (0x%02x)\n", CHARSET_MAX, CHARSET_MAX);
 	printf("CHARSET_LENGTH: %d\n", CHARSET_LENGTH);
+	printf("SALT_HASH_SIZE: %u\n", SALT_HASH_SIZE);
 	printf("Max. Markov mode level: %d\n", MAX_MKV_LVL);
 	printf("Max. Markov mode password length: %d\n", MAX_MKV_LEN);
-#if FCNTL_LOCKS
-	puts("File locking: fcntl()");
-#elif OS_FLOCK
-	puts("File locking: flock()");
-#else
-	puts("File locking: NOT supported by this build - do not run concurrent sessions!");
-#endif
-#ifdef __VERSION__
-	printf("Compiler version: %s\n", __VERSION__);
-#endif
-#ifdef __GNUC__
+
+#if __ICC
+	printf("icc version: %d.%d.%d (gcc %d.%d.%d compatibility)\n",
+	       __ICC / 100, (__ICC % 100) / 10, __ICC % 10,
+	       __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#elif defined(__clang_version__)
+	printf("clang version: %s (gcc %d.%d.%d compatibility)\n",
+	       __clang_version__,
+	       __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#elif __GNUC__
 	printf("gcc version: %d.%d.%d\n", __GNUC__,
 	       __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
-#endif
-#ifdef __ICC
-	printf("icc version: %d\n", __ICC);
-#endif
-#if defined(__clang_version__) && !__INTEL_COMPILER
-	printf("clang version: %s\n", __clang_version__);
-#endif
-
-#ifdef __GLIBC_MINOR__
-#ifdef __GLIBC__
-	printf("GNU libc version: %d.%d (loaded: %s)\n",
-	       __GLIBC__, __GLIBC_MINOR__, gnu_get_libc_version());
-#endif
-#endif
-
-#ifdef _MSC_VER
+#elif _MSC_VER
 /*
  * See https://msdn.microsoft.com/en-us/library/b0084kay.aspx
  * Currently, _MSC_BUILD is not reported, but we could convert
@@ -226,13 +176,28 @@ static void listconf_list_build_info(void)
 #ifdef __CLR_VER
 	puts("Common Language Runtime version: " __CLR_VER);
 #endif
+#elif defined(__VERSION__)
+	printf("Compiler version: %s\n", __VERSION__);
+#endif
+
+#ifdef __GLIBC_MINOR__
+#ifdef __GLIBC__
+	printf("GNU libc version: %d.%d (loaded: %s)\n",
+	       __GLIBC__, __GLIBC_MINOR__, gnu_get_libc_version());
+#endif
 #endif
 
 #if HAVE_CUDA
-	printf("CUDA library version: %s\n",get_cuda_header_version());
+	printf("CUDA headers version: %s\n",get_cuda_header_version());
 #endif
 #if HAVE_OPENCL
-	printf("OpenCL library version: %s\n",get_opencl_header_version());
+	printf("OpenCL headers version: %s\n",get_opencl_header_version());
+#endif
+#if HAVE_LIBSSL
+	printf("Crypto library: OpenSSL\n");
+#endif
+#if HAVE_COMMONCRYPTO
+	printf("Crypto library: CommonCrypto\n");
 #endif
 #ifdef OPENSSL_VERSION_NUMBER
 	printf("OpenSSL library version: %09lx", (unsigned long)OPENSSL_VERSION_NUMBER);
@@ -267,21 +232,23 @@ static void listconf_list_build_info(void)
 	       JS_REGEX_MAJOR_VERSION, JS_REGEX_MINOR_VERSION,
 	       rexgen_version());
 #endif
+
+#if FCNTL_LOCKS
+	puts("File locking: fcntl()");
+#elif OS_FLOCK
+	puts("File locking: flock()");
+#else
+	puts("File locking: NOT supported by this build - do not run concurrent sessions!");
+#endif
 	printf("fseek(): " STR_MACRO(jtr_fseek64) "\n");
 	printf("ftell(): " STR_MACRO(jtr_ftell64) "\n");
 	printf("fopen(): " STR_MACRO(jtr_fopen) "\n");
 #if HAVE_MEMMEM
-#define memmem_func	"System's\n"
+#define memmem_func	"System's"
 #else
-#define memmem_func	"JtR internal\n"
+#define memmem_func	"JtR internal"
 #endif
 	printf("memmem(): " memmem_func "\n");
-
-#if HAVE_OPENSSL
-	printf("Crypto library: OpenSSL\n");
-#elif HAVE_COMMONCRYPTO
-	printf("Crypto library: CommonCrypto\n");
-#endif
 
 // OK, now append debugging options, BUT only output  something if
 // one or more of them is set. IF none set, be silent.
@@ -298,6 +265,9 @@ static void listconf_list_build_info(void)
 #endif
 #ifdef WITH_ASAN
 	cpdbg += sprintf(cpdbg, "\tASan (Address Sanitizer debugging)\n");
+#endif
+#ifdef WITH_UBSAN
+	cpdbg += sprintf(cpdbg, "\tUbSan (Undefined Behavior Sanitizer debugging)\n");
 #endif
 	if (DebuggingOptions != cpdbg) {
 		printf("Built with these debugging options\n%s\n", DebuggingOptions);
@@ -381,7 +351,6 @@ void listconf_parse_early(void)
 	}
 }
 
-#if FMT_MAIN_VERSION > 11
 /*
  * List names of tunable cost parameters
  * Separator differs for --list=format-all-details (", ")
@@ -399,7 +368,6 @@ void list_tunable_cost_names(struct fmt_main *format, char *separator)
 		}
 	}
 }
-#endif
 
 char *get_test(struct fmt_main *format, int ntests)
 {
@@ -543,6 +511,13 @@ void listconf_parse_late(void)
 		setenv("BLOCKS", "1", 0);
 		setenv("THREADS", "1", 0);
 #endif
+
+#if 0
+		puts("label\tmaxlen\tmin/\tmaxkpc\tflags\tntests\talgorithm_name\tformat_name\tbench comment\tbench len\tbin size\tsalt size"
+		     "\tcosts"
+		     "\tminlen");
+#endif
+
 		format = fmt_list;
 		do {
 			int ntests = 0;
@@ -574,10 +549,8 @@ void listconf_parse_late(void)
    'real' salt size. Dynamic will always set params.salt_size to 0 or sizeof
    a pointer. */
    dynamic_real_salt_length(format) : format->params.salt_size);
-#if FMT_MAIN_VERSION > 11
 			printf("\t");
 			list_tunable_cost_names(format, ",");
-#endif
 			printf("\t%d\t%.256s\n",
 			       format->params.plaintext_min_length,
 /*
@@ -642,13 +615,32 @@ void listconf_parse_late(void)
 			printf("Max. keys per crypt                  %d\n", format->params.max_keys_per_crypt);
 			printf("Flags\n");
 			printf(" Case sensitive                      %s\n", (format->params.flags & FMT_CASE) ? "yes" : "no");
+			printf(" Truncates at (our) max. length      %s\n", (format->params.flags & FMT_TRUNC) ? "yes" : "no");
 			printf(" Supports 8-bit characters           %s\n", (format->params.flags & FMT_8_BIT) ? "yes" : "no");
 			printf(" Converts 8859-1 to UTF-16/UCS-2     %s\n", (format->params.flags & FMT_UNICODE) ? "yes" : "no");
 			printf(" Honours --encoding=NAME             %s\n", (format->params.flags & FMT_UTF8) ? "yes" : "no");
 			printf(" False positives possible            %s\n", (format->params.flags & FMT_NOT_EXACT) ? "yes" : "no");
 			printf(" Uses a bitslice implementation      %s\n", (format->params.flags & FMT_BS) ? "yes" : "no");
 			printf(" The split() method unifies case     %s\n", (format->params.flags & FMT_SPLIT_UNIFIES_CASE) ? "yes" : "no");
-			printf(" A $dynamic$ format                  %s\n", (format->params.flags & FMT_DYNAMIC) ? "yes" : "no");
+
+#ifndef DYNAMIC_DISABLED
+			if (format->params.flags & FMT_DYNAMIC) {
+#if SIMD_COEF_32
+				private_subformat_data *p = (private_subformat_data *)format->private.data;
+				if (p->pSetup->flags & MGF_FLAT_BUFFERS)
+					printf(" A $dynamic$ format                  yes (Flat buffer SIMD)\n");
+				else {
+					if (p->pSetup->flags & MGF_NOTSSE2Safe)
+					printf(" A $dynamic$ format                  yes (No SIMD)\n");
+					else
+					printf(" A $dynamic$ format                  yes (Interleaved SIMD)\n");
+				}
+#else
+				printf(" A $dynamic$ format                  yes\n");
+#endif
+			} else
+				printf(" A $dynamic$ format                  no\n");
+#endif
 			printf(" A dynamic sized salt                %s\n", (format->params.flags & FMT_DYNA_SALT) ? "yes" : "no");
 #ifdef _OPENMP
 			printf(" Parallelized with OpenMP            %s\n", (format->params.flags & FMT_OMP) ? "yes" : "no");
@@ -667,11 +659,9 @@ void listconf_parse_late(void)
    'real' salt size dynamic will alway set params.salt_size to 0 or
    sizeof a pointer. */
 			       dynamic_real_salt_length(format) : format->params.salt_size);
-#if FMT_MAIN_VERSION > 11
 			printf("Tunable cost parameters              ");
 			list_tunable_cost_names(format, ", ");
 			printf("\n");
-#endif
 
 /*
  * The below should probably stay as last line of output if adding more
@@ -721,14 +711,12 @@ void listconf_parse_late(void)
 				         strcasecmp(&options.listconf[15], "binary") &&
 				         strcasecmp(&options.listconf[15], "clear_keys") &&
 				         strcasecmp(&options.listconf[15], "salt") &&
-#if FMT_MAIN_VERSION > 11
 				         strcasecmp(&options.listconf[15], "tunable_cost_value") &&
 				         strcasecmp(&options.listconf[15], "tunable_cost_value[0]") &&
 #if FMT_TUNABLE_COSTS > 1
 				         strcasecmp(&options.listconf[15], "tunable_cost_value[1]") &&
 #if FMT_TUNABLE_COSTS > 2
 				         strcasecmp(&options.listconf[15], "tunable_cost_value[2]") &&
-#endif
 #endif
 #endif
 					 strcasecmp(&options.listconf[15], "source") &&
@@ -774,7 +762,6 @@ void listconf_parse_late(void)
 				if (format->methods.salt != fmt_default_salt && !strcasecmp(&options.listconf[15], "salt"))
 					ShowIt = 1;
 
-#if FMT_MAIN_VERSION > 11
 				for (i = 0; i < FMT_TUNABLE_COSTS; ++i) {
 					char Buf[30];
 					sprintf(Buf, "tunable_cost_value[%d]", i);
@@ -783,7 +770,6 @@ void listconf_parse_late(void)
 				}
 				if (format->methods.tunable_cost_value[0] && !strcasecmp(&options.listconf[15], "tunable_cost_value"))
 					ShowIt = 1;
-#endif
 
 				if (format->methods.source != fmt_default_source && !strcasecmp(&options.listconf[15], "source"))
 					ShowIt = 1;
@@ -818,6 +804,10 @@ void listconf_parse_late(void)
 				printf("Methods overridden for:   %s [%s] %s\n", format->params.label, format->params.algorithm_name, format->params.format_name);
 				if (format->methods.init != fmt_default_init)
 					printf("\tinit()\n");
+				if (format->methods.done != fmt_default_done)
+					printf("\tdone()\n");
+				if (format->methods.reset != fmt_default_reset)
+					printf("\treset()\n");
 				if (format->methods.prepare != fmt_default_prepare)
 					printf("\tprepare()\n");
 				printf("\tvalid()\n");
@@ -827,7 +817,6 @@ void listconf_parse_late(void)
 					printf("\tbinary()\n");
 				if (format->methods.salt != fmt_default_salt)
 					printf("\tsalt()\n");
-#if FMT_MAIN_VERSION > 11
 				for (i = 0; i < FMT_TUNABLE_COSTS; ++i)
 /*
  * Here, a NULL value serves as default,
@@ -835,15 +824,12 @@ void listconf_parse_late(void)
  */
 					if (format->methods.tunable_cost_value[i])
 						printf("\t\ttunable_cost_value[%d]()\n", i);
-#endif
 				if (format->methods.source != fmt_default_source)
 					printf("\tsource()\n");
 				for (i = 0; i < PASSWORD_HASH_SIZES; ++i)
 					if (format->methods.binary_hash[i] != fmt_default_binary_hash) {
 						if (format->methods.binary_hash[i])
 							printf("\t\tbinary_hash[%d]()\n", i);
-						else
-							printf("\t\tbinary_hash[%d]()  (NULL pointer)\n", i);
 					}
 				if (format->methods.salt_hash != fmt_default_salt_hash)
 					printf("\tsalt_hash()\n");
@@ -858,15 +844,13 @@ void listconf_parse_late(void)
 				printf("\tget_key()\n");
 				if (format->methods.clear_keys != fmt_default_clear_keys)
 					printf("\tclear_keys()\n");
+// there is no default for crypt_all() it must be defined.
+				printf("\tcrypt_all()\n");
 				for (i = 0; i < PASSWORD_HASH_SIZES; ++i)
 					if (format->methods.get_hash[i] != fmt_default_get_hash) {
 						if (format->methods.get_hash[i])
 							printf("\t\tget_hash[%d]()\n", i);
-						else
-							printf("\t\tget_hash[%d]()  (NULL pointer)\n", i);
 					}
-// there is no default for crypt_all() it must be defined.
-				printf("\tcrypt_all()\n");
 // there is no default for cmp_all() it must be defined.
 				printf("\tcmp_all()\n");
 // there is no default for cmp_one() it must be defined.

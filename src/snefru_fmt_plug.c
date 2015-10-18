@@ -34,7 +34,9 @@ static int omp_t = 1;
 // 128 - 1474k   1902k *** this was chosen
 // 256 - 1508k   1511k
 // 512 - 1649k   1564k
+#ifndef OMP_SCALE
 #define OMP_SCALE  128
+#endif
 #endif
 
 #include "memdbg.h"
@@ -101,12 +103,8 @@ static int valid(char *ciphertext, struct fmt_main *self, int len)
 
 	if (!strncmp(p, FORMAT_TAG, TAG_LENGTH))
 		p += TAG_LENGTH;
-	if (strlen(p) != len)
+	if (hexlenl(p) != len)
 		return 0;
-
-	while(*p)
-		if(atoi16[ARCH_INDEX(*p++)]==0x7f)
-			return 0;
 
 	return 1;
 }
@@ -168,13 +166,13 @@ static void *get_binary_128(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static int crypt_256(int *pcount, struct db_salt *salt)
 {
@@ -277,9 +275,7 @@ struct fmt_main fmt_snefru_256 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		snefru_256_tests
 	}, {
 		init,
@@ -290,9 +286,7 @@ struct fmt_main fmt_snefru_256 = {
 		fmt_default_split,
 		get_binary_256,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,
@@ -342,10 +336,7 @@ struct fmt_main fmt_snefru_128 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
-		{ NULL },
-#endif
-		snefru_128_tests
+		{ NULL },snefru_128_tests
 	}, {
 		init,
 		done,
@@ -355,9 +346,7 @@ struct fmt_main fmt_snefru_128 = {
 		fmt_default_split,
 		get_binary_128,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

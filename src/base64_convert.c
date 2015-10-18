@@ -15,7 +15,7 @@
  *     raw      (binary)
  *     hex
  *     mime     (A..Za..z0..1+/   The == for null trails may be optional, removed for now)
- *     crypt    (./0..9A..Za..Z   Similar to encoding used by crypt)
+ *     crypt    (./0..9A..Za..z   Similar to encoding used by crypt)
  *     cryptBS  like crypt, but bit swapped encoding order
  */
 
@@ -253,13 +253,11 @@ static void hex_to_raw(const char *from, int len, unsigned char *to) {
  * conversion.  With these functions we should be able to walk through a buffer
  ******************************************************************************************/
 static int mime_to_cryptBS(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len_left = strlen(cpi);
 	int use_bytes=3;
-	if (to_len < len_left) {
-		fprintf(stderr, "ERROR, mime_to_cryptBS, output buffer not large enough\n");
-		error();
-	}
+	if (to_len < len_left)
+		error_msg("ERROR, mime_to_cryptBS, output buffer not large enough\n");
 	while (len_left > 0) {
 		char tmp[4];
 		if(len_left<4) {
@@ -280,13 +278,11 @@ static int mime_to_cryptBS(const char *cpi, char *cpo, int to_len, int flags) {
 	return strlen(cpo_o);
 }
 static int mime_to_crypt(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len_left = strlen(cpi);
 	int use_bytes=3;
-	if (to_len < len_left) {
-		fprintf(stderr, "ERROR, mime_to_crypt, output buffer not large enough\n");
-		error();
-	}
+	if (to_len < len_left)
+		error_msg("ERROR, mime_to_crypt, output buffer not large enough\n");
 	while (len_left > 0) {
 		char tmp[4];
 		if(len_left<4) {
@@ -307,13 +303,11 @@ static int mime_to_crypt(const char *cpi, char *cpo, int to_len, int flags) {
 	return strlen(cpo_o);
 }
 static int crypt_to_cryptBS(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len_left = strlen(cpi);
 	int use_bytes=3;
-	if (to_len < len_left) {
-		fprintf(stderr, "ERROR, crypt_to_cryptBS, output buffer not large enough\n");
-		error();
-	}
+	if (to_len < len_left)
+		error_msg("ERROR, crypt_to_cryptBS, output buffer not large enough\n");
 	while (len_left > 0) {
 		char tmp[4];
 		if(len_left<4) {
@@ -334,13 +328,11 @@ static int crypt_to_cryptBS(const char *cpi, char *cpo, int to_len, int flags) {
 	return strlen(cpo_o);
 }
 static int crypt_to_mime(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len_left = strlen(cpi);
 	int use_bytes=3;
-	if (to_len < len_left) {
-		fprintf(stderr, "ERROR, crypt_to_mime, output buffer not large enough\n");
-		error();
-	}
+	if (to_len < len_left)
+		error_msg("ERROR, crypt_to_mime, output buffer not large enough\n");
 	while (len_left > 0) {
 		char tmp[4];
 		if(len_left<4) {
@@ -361,13 +353,11 @@ static int crypt_to_mime(const char *cpi, char *cpo, int to_len, int flags) {
 	return strlen(cpo_o);
 }
 static int cryptBS_to_mime(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len_left = strlen(cpi);
 	int use_bytes=3;
-	if (to_len < len_left) {
-		fprintf(stderr, "ERROR, cryptBS_to_mime, output buffer not large enough\n");
-		error();
-	}
+	if (to_len < len_left)
+		error_msg("ERROR, cryptBS_to_mime, output buffer not large enough\n");
 	while (len_left > 0) {
 		char tmp[4];
 		if(len_left<4) {
@@ -388,13 +378,11 @@ static int cryptBS_to_mime(const char *cpi, char *cpo, int to_len, int flags) {
 	return strlen(cpo_o);
 }
 static int cryptBS_to_crypt(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len_left = strlen(cpi);
 	int use_bytes=3;
-	if (to_len < len_left) {
-		fprintf(stderr, "ERROR, cryptBS_to_crypt, output buffer not large enough\n");
-		error();
-	}
+	if (to_len < len_left)
+		error_msg("ERROR, cryptBS_to_crypt, output buffer not large enough\n");
 	while (len_left > 0) {
 		char tmp[4];
 		if(len_left<4) {
@@ -421,7 +409,7 @@ static int cryptBS_to_crypt(const char *cpi, char *cpo, int to_len, int flags) {
  * to do a conversion.  With these functions we should be able to walk through a buffer
  ******************************************************************************************/
 static int hex_to_cryptBS(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len=0, len_left = strlen(cpi), this_len=4;
 	int use_bytes=3;
 	while (len_left > 0) {
@@ -446,7 +434,7 @@ static int hex_to_cryptBS(const char *cpi, char *cpo, int to_len, int flags) {
 	return strlen(cpo_o);
 }
 static int hex_to_crypt(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len=0, len_left = strlen(cpi), this_len=4;
 	int use_bytes=3;
 	while (len_left > 0) {
@@ -471,7 +459,7 @@ static int hex_to_crypt(const char *cpi, char *cpo, int to_len, int flags) {
 	return strlen(cpo_o);
 }
 static int hex_to_mime(const char *cpi, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len=0, len_left = strlen(cpi), this_len=4;
 	int use_bytes=3;
 	while (len_left > 0) {
@@ -496,7 +484,7 @@ static int hex_to_mime(const char *cpi, char *cpo, int to_len, int flags) {
 	return strlen(cpo_o);
 }
 static int cryptBS_to_hex(const char *cpi, int len_left, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len, this_len=3;
 	len = 0;
 	while (len_left > 0) {
@@ -520,7 +508,7 @@ static int cryptBS_to_hex(const char *cpi, int len_left, char *cpo, int to_len, 
 	return strlen(cpo_o);
 }
 static int crypt_to_hex(const char *cpi, int len_left, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len, this_len=3;
 	len = 0;
 	while (len_left > 0) {
@@ -608,7 +596,7 @@ static int mime_to_raw(const char *cpi, int len_left, char *cpo, int to_len, int
 	return len;
 }
 static int raw_to_mime(const char *cpi, int len_left, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len = 0;
 	while (len_left > 0) {
 		if(len_left<3) {
@@ -628,7 +616,7 @@ static int raw_to_mime(const char *cpi, int len_left, char *cpo, int to_len, int
 	return strlen(cpo_o);
 }
 static int raw_to_crypt(const char *cpi, int len_left, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len = 0;
 	while (len_left > 0) {
 		if(len_left<3) {
@@ -648,7 +636,7 @@ static int raw_to_crypt(const char *cpi, int len_left, char *cpo, int to_len, in
 	return strlen(cpo_o);
 }
 static int raw_to_cryptBS(const char *cpi, int len_left, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len = 0;
 	while (len_left > 0) {
 		if(len_left<3) {
@@ -669,7 +657,7 @@ static int raw_to_cryptBS(const char *cpi, int len_left, char *cpo, int to_len, 
 }
 
 static int mime_to_hex(const char *cpi, int len_left, char *cpo, int to_len, int flags) {
-	char Tmp[3], *cpo_o = cpo;
+	char Tmp[5], *cpo_o = cpo;
 	int len, this_len=3;
 	len = 0;
 	while (len_left > 0) {
@@ -1115,6 +1103,10 @@ int base64_valid_length(const char *from, b64_convert_type from_t, unsigned flag
 		default:
 			return ERR_base64_unk_from_type;
 	}
+	// we need to check from[-1] first.  We could be at null, or 1 byte past null at this point
+	// so both need to be checked, checking [-1] first to avoid ASAN overflow errors.
+	if ((flags&flg_Base64_RET_NEG_IF_NOT_PURE) == flg_Base64_RET_NEG_IF_NOT_PURE && len && from[-1] && *from)
+		return -len;
 	return len;
 }
 
@@ -1127,7 +1119,7 @@ int base64_valid_length(const char *from, b64_convert_type from_t, unsigned flag
 /* used by base64conv 'main()' function */
 static int usage(char *name)
 {
-	fprintf(stderr, "Usage: %s [-l] [-i intype] [-o outtype] [-q] [-e] [-f flag] [data[data ...] | < stdin]\n"
+	fprintf(stderr, "Usage: %s [-l] [-i intype] [-o outtype] [-q] [-w] [-e] [-f flag] [data[data ...] | < stdin]\n"
 	        " - data must match input_type i.e. if hex, then data should be in hex\n"
 	        " - if data is not present, then base64conv will read data from std input)\n"
 	        " - if data read from stdin, max size of any line is 256k\n"
@@ -1135,6 +1127,10 @@ static int usage(char *name)
 	        "  -q will only output resultant string. No extra junk text\n"
 	        "  -e turns on buffer overwrite error checking logic\n"
 	        "  -l performs a 'length' test\n"
+			"\n"
+			"  -r ifname  process whole file ifname (this is the input file)\n"
+			"  -w ofname  The output filename for whole file processing\n"
+			"             NOTE, -r and -w have to be used as a pair\n"
 	        "\n"
 	        "Input/Output types:\n"
 	        "  raw      raw data byte\n"
@@ -1173,6 +1169,64 @@ static int handle_flag_type(const char *pflag) {
 	if (!strcasecmp(pflag, "MIME_DASH_UNDER"))  return flg_Base64_MIME_DASH_UNDER;
 
 	return 0;
+}
+
+static void do_convert_wholefile(char *fname, char *outfname, b64_convert_type in_t,
+                       b64_convert_type out_t, int quiet,
+                       int err_chk, int flags)
+{
+	char *po;
+	int i, len, in_len;
+	char *in_str;
+	FILE *fp;
+
+	fp = fopen(fname, "rb");
+	if (!fp) {
+		fprintf (stderr, "Error, could not find file [%s]\n", fname);
+		exit(-1);
+	}
+	fseek(fp, 0, SEEK_END);
+	in_len = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	if (in_len == 0)
+		return;
+	in_str = (char*)mem_calloc(1, in_len+4);
+	if (fread(in_str, 1, in_len, fp) != in_len) {
+		fprintf (stderr, "Error, reading file [%s]\n", fname);
+		fclose(fp);
+		exit(-1);
+	}
+	fclose(fp);
+	fp = fopen(outfname, "wb");
+
+	if (!quiet)
+		printf("%s  -->  %s", in_str, in_len ? "" : "\n");
+
+	po = (char*)mem_calloc(3, in_len+2);
+	if (err_chk)
+		memset(po, 2, in_len*3+6);
+	len=base64_convert(in_str, in_t, in_len, po, out_t, in_len*3, flags);
+	fwrite(po, 1, len, fp);
+	fclose(fp);
+	/* check for overwrite problems */
+	if (err_chk) {
+		int tot = in_len*3;
+		i=len;
+		if (po[i]) {
+			fprintf(stderr, "OverwriteLogic: Null byte missing\n");
+		}
+		for (++i; i < tot; ++i)
+		{
+			if (((unsigned char)po[i]) != 2) {
+				/* we ignore overwrites that are 1 or 2 bytes over.  The way the */
+				/* functions are written, we expect some 1 and 2 byte overflows, */
+				/* and the caller MUST be aware of that fact                     */
+				if (i-len > 2)
+					fprintf(stderr, "OverwriteLogic: byte %c (%02X) located at offset %d (%+d)\n", (unsigned char)po[i], (unsigned char)po[i], i, i-len);
+			}
+		}
+	}
+	MEM_FREE(po);
 }
 
 static void do_convert(char *in_str, b64_convert_type in_t,
@@ -1255,13 +1309,14 @@ void length_test() {
 int base64conv(int argc, char **argv) {
 	int c;
 	b64_convert_type in_t=e_b64_unk, out_t=e_b64_unk;
-	int quiet=0,err_chk=0,did_len_check=0;
+	int quiet=0,err_chk=0,did_len_check=0,wholefile=0;
+	char *fname=NULL, *outfname=NULL;
 	int flags=flg_Base64_NO_FLAGS;
 
 	/* Parse command line */
 	if (argc == 1)
 		return usage(argv[0]);
-	while ((c = getopt(argc, argv, "i:o:q!e!f:l!")) != -1) {
+	while ((c = getopt(argc, argv, "i:o:q!e!f:l!w:r:")) != -1) {
 		switch (c) {
 		case 'i':
 			in_t = str2convtype(optarg);
@@ -1287,6 +1342,14 @@ int base64conv(int argc, char **argv) {
 		case 'q':
 			quiet=1;
 			break;
+		case 'w':
+			wholefile=1;
+			outfname=optarg;
+			break;
+		case 'r':
+			wholefile=1;
+			fname=optarg;
+			break;
 		case 'e':
 			err_chk=1;
 			break;
@@ -1301,6 +1364,14 @@ int base64conv(int argc, char **argv) {
 	}
 	argc -= optind;
 	argv += optind;
+	if (wholefile) {
+		if (!fname || !outfname) {
+			fprintf(stderr, "Error, -r and -w have to be used as a pair\n");
+			exit(-1);
+		}
+		do_convert_wholefile(fname, outfname, in_t, out_t, quiet, err_chk, flags);
+		return 0;
+	}
 	if (!argc) {
 		// if we are out of params, then read from stdin
 		char *buf;

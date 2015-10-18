@@ -88,7 +88,6 @@ john_register_one(&fmt_cryptsha256);
 #include "arch.h"
 
 //#undef SIMD_COEF_32
-//#undef SIMD_COEF_32
 
 #include "sha2.h"
 
@@ -99,10 +98,12 @@ john_register_one(&fmt_cryptsha256);
 #include "common.h"
 #include "formats.h"
 #include "johnswap.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 
 #ifdef _OPENMP
+#ifndef OMP_SCALE
 #define OMP_SCALE			8
+#endif
 #include <omp.h>
 #endif
 
@@ -151,21 +152,18 @@ john_register_one(&fmt_cryptsha256);
 
 #define SALT_SIZE				sizeof(struct saltstruct)
 
-#define MIN_KEYS_PER_CRYPT		1
 #ifdef SIMD_COEF_32
-#define MAX_KEYS_PER_CRYPT		SIMD_COEF_32
+#define MIN_KEYS_PER_CRYPT		(SIMD_COEF_32*SIMD_PARA_SHA256)
+#define MAX_KEYS_PER_CRYPT		(SIMD_COEF_32*SIMD_PARA_SHA256)
 #else
+#define MIN_KEYS_PER_CRYPT		1
 #define MAX_KEYS_PER_CRYPT		1
 #endif
 
 #define __CRYPTSHA256_CREATE_PROPER_TESTS_ARRAY__
 #include "cryptsha256_common.h"
 
-#ifndef SIMD_COEF_32
-#define BLKS 1
-#else
-#define BLKS SIMD_COEF_32
-#endif
+#define BLKS MAX_KEYS_PER_CRYPT
 
 /* This structure is 'pre-loaded' with the keyspace of all possible crypts which  */
 /* will be performed WITHIN the inner loop.  There are 8 possible buffers that    */
@@ -210,11 +208,10 @@ typedef struct cryptloopstruct_t {
 static int (*saved_len);
 static char (*saved_key)[PLAINTEXT_LENGTH + 1];
 static ARCH_WORD_32 (*crypt_out)[BINARY_SIZE / sizeof(ARCH_WORD_32)];
-static int max_crypts;
 
 /* these 2 values are used in setup of the cryptloopstruct, AND to do our SHA256_Init() calls, in the inner loop */
 static const unsigned char padding[128] = { 0x80, 0 /* 0,0,0,0.... */ };
-#if !defined(JTR_INC_COMMON_CRYPTO_SHA2) && !defined (SIMD_COEF_64)
+#if !defined(JTR_INC_COMMON_CRYPTO_SHA2) && !defined (SIMD_COEF_32)
 static const ARCH_WORD_32 ctx_init[8] =
 	{0x6A09E667,0xBB67AE85,0x3C6EF372,0xA54FF53A,0x510E527F,0x9B05688C,0x1F83D9AB,0x5BE0CD19};
 #endif
@@ -228,6 +225,8 @@ static struct saltstruct {
 static void init(struct fmt_main *self)
 {
 	int omp_t = 1;
+	int max_crypts;
+
 #ifdef _OPENMP
 	omp_t = omp_get_max_threads();
 	omp_t *= OMP_SCALE;
@@ -248,13 +247,13 @@ static void done(void)
 	MEM_FREE(saved_len);
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static void set_key(char *key, int index)
 {
@@ -594,7 +593,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 #ifdef SIMD_COEF_32
 	// group based upon size splits.
-	MixOrder = mem_calloc((count+6*SIMD_COEF_32), sizeof(int));
+	MixOrder = mem_calloc((count+6*MAX_KEYS_PER_CRYPT), sizeof(int));
 	{
 		static const int lens[17][6] = {
 			{0,12,24,38,39,40},  //  0 byte salt (down to 2 slots now, but probably NOT valid.)
@@ -622,7 +621,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 				if (saved_len[index] >= lens[cur_salt->len][j] && saved_len[index] < lens[cur_salt->len][j+1])
 					MixOrder[tot_todo++] = index;
 			}
-			while (tot_todo & (SIMD_COEF_32-1))
+			while (tot_todo % MAX_KEYS_PER_CRYPT)
 				MixOrder[tot_todo++] = count;
 		}
 	}
@@ -652,14 +651,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		char *cp;
 		char p_bytes[PLAINTEXT_LENGTH+1];
 		char s_bytes[PLAINTEXT_LENGTH+1];
-		//JTR_ALIGN(MEM_ALIGN_SIMD) cryptloopstruct crypt_struct;
-		// alignment may 'fail' on cygwin32 for OMP builds :(
-		// so do the alignment by hand
 		char tmp_cls[sizeof(cryptloopstruct)+MEM_ALIGN_SIMD];
 		cryptloopstruct *crypt_struct;
 #ifdef SIMD_COEF_32
-		//JTR_ALIGN(MEM_ALIGN_SIMD) ARCH_WORD_32 sse_out[64];
-		char tmp_sse_out[8*SIMD_COEF_32*4+MEM_ALIGN_SIMD];
+		char tmp_sse_out[8*MAX_KEYS_PER_CRYPT*4+MEM_ALIGN_SIMD];
 		ARCH_WORD_32 *sse_out;
 		sse_out = (ARCH_WORD_32 *)mem_align(tmp_sse_out, MEM_ALIGN_SIMD);
 #endif
@@ -754,32 +749,31 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		for (cnt = 1; ; ++cnt) {
 			if (crypt_struct->datlen[idx]==128) {
 				unsigned char *cp = crypt_struct->bufs[0][idx];
-				SSESHA256body((__m128i *)cp, sse_out, NULL, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK);
-				SSESHA256body((__m128i *)&cp[64], sse_out, sse_out, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK|SSEi_RELOAD);
+				SIMDSHA256body((__m128i *)cp, sse_out, NULL, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK);
+				SIMDSHA256body((__m128i *)&cp[64], sse_out, sse_out, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK|SSEi_RELOAD);
 			} else {
 				unsigned char *cp = crypt_struct->bufs[0][idx];
-				SSESHA256body((__m128i *)cp, sse_out, NULL, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK);
+				SIMDSHA256body((__m128i *)cp, sse_out, NULL, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK);
 			}
-
 			if (cnt == cur_salt->rounds)
 				break;
 			{
-				int j, k;
-				for (k = 0; k < SIMD_COEF_32; ++k) {
+				unsigned int j, k;
+				for (k = 0; k < MAX_KEYS_PER_CRYPT; ++k) {
 					ARCH_WORD_32 *o = (ARCH_WORD_32 *)crypt_struct->cptr[k][idx];
 					for (j = 0; j < 8; ++j)
-						*o++ = JOHNSWAP(sse_out[(j*SIMD_COEF_32)+k]);
+						*o++ = JOHNSWAP(sse_out[(j*SIMD_COEF_32)+(k&(SIMD_COEF_32-1))+k/SIMD_COEF_32*8*SIMD_COEF_32]);
 				}
 			}
 			if (++idx == 42)
 				idx = 0;
 		}
 		{
-			int j, k;
-			for (k = 0; k < SIMD_COEF_32; ++k) {
+			unsigned int j, k;
+			for (k = 0; k < MAX_KEYS_PER_CRYPT; ++k) {
 				ARCH_WORD_32 *o = (ARCH_WORD_32 *)crypt_out[MixOrder[index+k]];
 				for (j = 0; j < 8; ++j)
-					*o++ = JOHNSWAP(sse_out[(j*SIMD_COEF_32)+k]);
+					*o++ = JOHNSWAP(sse_out[(j*SIMD_COEF_32)+(k&(SIMD_COEF_32-1))+k/SIMD_COEF_32*8*SIMD_COEF_32]);
 			}
 		}
 #else
@@ -877,7 +871,7 @@ static int cmp_all(void *binary, int count)
 {
 	int index = 0;
 	for (; index < count; index++)
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -892,7 +886,6 @@ static int cmp_exact(char *source, int index)
 	return 1;
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int iteration_count(void *salt)
 {
 	struct saltstruct *sha256crypt_salt;
@@ -900,7 +893,6 @@ static unsigned int iteration_count(void *salt)
 	sha256crypt_salt = salt;
 	return (unsigned int)sha256crypt_salt->rounds;
 }
-#endif
 
 // Public domain hash function by DJ Bernstein
 // We are hashing the entire struct
@@ -932,11 +924,9 @@ struct fmt_main fmt_cryptsha256 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		tests
 	}, {
 		init,
@@ -947,11 +937,9 @@ struct fmt_main fmt_cryptsha256 = {
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

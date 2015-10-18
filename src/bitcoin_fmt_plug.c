@@ -15,33 +15,33 @@
  * Thanks to Solar for asking to add support for bitcoin wallet files.
  */
 
-#include "arch.h"
-#include <openssl/opensslv.h>
-#if (AC_BUILT && HAVE_EVP_SHA512) || \
-	(!AC_BUILT && OPENSSL_VERSION_NUMBER >= 0x0090708f)
-
 #if FMT_EXTERNS_H
 extern struct fmt_main fmt_bitcoin;
 #elif FMT_REGISTERS_H
 john_register_one(&fmt_bitcoin);
 #else
 
-#include <openssl/evp.h>
 #include <string.h>
+#ifdef _OPENMP
+#include <omp.h>
+#ifndef OMP_SCALE
+#define OMP_SCALE               1
+#endif
+static int omp_t = 1;
+#endif
+
+#include "arch.h"
 #include "misc.h"
 #include "common.h"
 #include "formats.h"
 #include "params.h"
 #include "options.h"
 #include "sha2.h"
+#include "aes.h"
 #include "stdint.h"
 #include "johnswap.h"
-#include "sse-intrinsics.h"
-#ifdef _OPENMP
-#include <omp.h>
-#define OMP_SCALE               1
-static int omp_t = 1;
-#endif
+#include "simd-intrinsics.h"
+#include "jumbo.h"
 #include "memdbg.h"
 
 #define FORMAT_LABEL		"Bitcoin"
@@ -57,6 +57,10 @@ static int omp_t = 1;
 #endif
 #endif
 
+#if !defined (SHA512_DIGEST_LENGTH)
+#define SHA512_DIGEST_LENGTH 64
+#endif
+
 #define BENCHMARK_COMMENT	""
 #define BENCHMARK_LENGTH	-1
 #define PLAINTEXT_LENGTH	64
@@ -65,8 +69,8 @@ static int omp_t = 1;
 #define SALT_ALIGN			sizeof(int)
 #define SALT_SIZE		sizeof(struct custom_salt)
 #ifdef SIMD_COEF_64
-#define MIN_KEYS_PER_CRYPT	SIMD_COEF_64
-#define MAX_KEYS_PER_CRYPT	SIMD_COEF_64
+#define MIN_KEYS_PER_CRYPT	(SIMD_COEF_64*SIMD_PARA_SHA512)
+#define MAX_KEYS_PER_CRYPT	(SIMD_COEF_64*SIMD_PARA_SHA512)
 #else
 #define MIN_KEYS_PER_CRYPT	1
 #define MAX_KEYS_PER_CRYPT	1
@@ -108,13 +112,18 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
+	saved_key = mem_calloc_align(sizeof(*saved_key),
 			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
 	any_cracked = 0;
 	cracked_size = sizeof(*cracked) * self->params.max_keys_per_crypt;
-	cracked = mem_calloc_tiny(cracked_size, MEM_ALIGN_WORD);
+	cracked = mem_calloc_align(sizeof(*cracked), self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
 }
 
+static void done(void)
+{
+	MEM_FREE(cracked);
+	MEM_FREE(saved_key);
+}
 // #define  BTC_DEBUG
 
 #ifdef BTC_DEBUG
@@ -141,43 +150,52 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 	if ((p = strtokm(ctcopy, "$")) == NULL) /* cry_master_length (of the hex string) */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	res = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL) /* cry_master */
 		goto err;
 	if (strlen(p) != res || strlen(p) > SZ * 2) /* validates atoi() and cry_master */
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL) /* cry_salt_length (length of hex string) */
+		goto err;
+	if (!isdec(p))
 		goto err;
 	res = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL) /* cry_salt */
 		goto err;
 	if (strlen(p) != res || strlen(p) > SZ * 2) /* validates atoi() and cry_salt */
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL) /* cry_rounds */
 		goto err;
 	if (!isdec(p))
 		goto err;
+	res = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL) /* ckey_length (of hex) */
+		goto err;
+	if (!isdec(p))
 		goto err;
 	res = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL) /* ckey */
 		goto err;
 	if (strlen(p) != res || strlen(p) > SZ * 2) /* validates atoi() and ckey */
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL) /* public_key_length */
+		goto err;
+	if (!isdec(p))
 		goto err;
 	res = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL) /* public_key */
 		goto err;
 	if (strlen(p) != res || strlen(p) > SZ * 2) /* validates atoi() and public_key */
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 	MEM_FREE(keeptr);
 	return 1;
@@ -250,18 +268,11 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 #endif
 	{
 		unsigned char output[SZ];
-		int fOk;
 		SHA512_CTX sha_ctx;
-		EVP_CIPHER_CTX ctx;
-		int nPLen, nFLen;
 		int i;
 
 #ifdef SIMD_COEF_64
-		//JTR_ALIGN(MEM_ALIGN_SIMD) ARCH_WORD_64 key_iv[SIMD_COEF_64*SHA512_BUF_SIZ];  // 2 * 16 bytes == 2048 bits, i.e. two SHA blocks
-		// the above alignment was crashing on OMP build on some 32 bit linux (compiler bug?? not aligning).
-		// so the alignment was done using raw buffer, and aligning at runtime to get 16 byte alignment.
-		// that works, and should cause no noticeable overhead differences.
-		char unaligned_buf[SIMD_COEF_64*SHA512_BUF_SIZ*sizeof(ARCH_WORD_64)+MEM_ALIGN_SIMD];
+		char unaligned_buf[MAX_KEYS_PER_CRYPT*SHA_BUF_SIZ*sizeof(ARCH_WORD_64)+MEM_ALIGN_SIMD];
 		ARCH_WORD_64 *key_iv = (ARCH_WORD_64*)mem_align(unaligned_buf, MEM_ALIGN_SIMD);
 		JTR_ALIGN(8)  unsigned char hash1[SHA512_DIGEST_LENGTH];            // 512 bits
 		int index2;
@@ -273,63 +284,55 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 			SHA512_Update(&sha_ctx, cur_salt->cry_salt, cur_salt->cry_salt_length);
 			SHA512_Final(hash1, &sha_ctx);
 
+			// Now copy and convert hash1 from flat into SIMD_COEF_64 buffers.
+			for (i = 0; i < SHA512_DIGEST_LENGTH/sizeof(ARCH_WORD_64); ++i) {
+#if COMMON_DIGEST_FOR_OPENSSL
+				key_iv[SIMD_COEF_64*i + (index2&(SIMD_COEF_64-1)) + index2/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64] = sha_ctx.hash[i];  // this is in BE format
+#else
+				key_iv[SIMD_COEF_64*i + (index2&(SIMD_COEF_64-1)) + index2/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64] = sha_ctx.h[i];
+#endif
+			}
+
 			// We need to set ONE time, the upper half of the data buffer.  We put the 0x80 byte (in BE format), at offset
 			// 512-bits (SHA512_DIGEST_LENGTH) multiplied by the SIMD_COEF_64 (same as MAX_KEYS_PER_CRYPT), then zero
 			// out the rest of the buffer, putting 512 (#bits) at the end.  Once this part of the buffer is set up, we never
 			// touch it again, for the rest of the crypt.  We simply overwrite the first half of this buffer, over and over
 			// again, with BE results of the prior hash.
-			key_iv[ SHA512_DIGEST_LENGTH/sizeof(ARCH_WORD_64) * SIMD_COEF_64 + index2 ] = 0x8000000000000000ULL;
-			for (i = (SHA512_DIGEST_LENGTH/sizeof(ARCH_WORD_64)+1) * SIMD_COEF_64 + index2; i < 15*SIMD_COEF_64; i += SIMD_COEF_64)
-				key_iv[i] = 0;
-			key_iv[15*SIMD_COEF_64 + index2] = (SHA512_DIGEST_LENGTH << 3);
-
-			// Now copy and convert hash1 from flat into SIMD_COEF_64 buffers.
-			for (i = 0; i < SHA512_DIGEST_LENGTH/sizeof(ARCH_WORD_64); ++i) {
-#if COMMON_DIGEST_FOR_OPENSSL
-				key_iv[SIMD_COEF_64*i + index2] = sha_ctx.hash[i];  // this is in BE format
-#else
-				key_iv[SIMD_COEF_64*i + index2] = sha_ctx.h[i];
-#endif
-			}
+			key_iv[ SHA512_DIGEST_LENGTH/sizeof(ARCH_WORD_64) * SIMD_COEF_64 + (index2&(SIMD_COEF_64-1)) + index2/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64 ] = 0x8000000000000000ULL;
+			for (i = (SHA512_DIGEST_LENGTH/sizeof(ARCH_WORD_64)+1); i < 15; i++)
+				key_iv[i*SIMD_COEF_64 + (index2&(SIMD_COEF_64-1)) + index2/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64] = 0;
+			key_iv[15*SIMD_COEF_64 + (index2&(SIMD_COEF_64-1)) + index2/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64] = (SHA512_DIGEST_LENGTH << 3);
 		}
 
 		for (i = 1; i < cur_salt->cry_rounds; i++)  // start at 1; the first iteration is already done
-			SSESHA512body(key_iv, key_iv, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
-
-		// We must fixup final results.  We have been working in BE (NOT switching out of, just to switch back into it at every loop).
-		// Convert the first 6 words (48 bytes, all we need) of each hash back to LE.
-		alter_endianity_to_BE64(key_iv, 6 * MAX_KEYS_PER_CRYPT);
+			SIMDSHA512body(key_iv, key_iv, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
 
 		for (index2 = 0; index2 < MAX_KEYS_PER_CRYPT; index2++) {
+			AES_KEY aes_key;
 			unsigned char key[32];
 			unsigned char iv[16];
 
-			// Copy and convert from SIMD_COEF_64 buffers back into flat buffers
+			// Copy and convert from SIMD_COEF_64 buffers back into flat buffers, in little-endian
 			for (i = 0; i < sizeof(key)/sizeof(ARCH_WORD_64); i++)  // the derived key
-				((ARCH_WORD_64 *)key)[i] = key_iv[SIMD_COEF_64*i + index2];
+				((ARCH_WORD_64 *)key)[i] = JOHNSWAP64(key_iv[SIMD_COEF_64*i + (index2&(SIMD_COEF_64-1)) + index2/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64]);
 			for (i = 0; i < sizeof(iv)/sizeof(ARCH_WORD_64); i++)   // the derived iv
-				((ARCH_WORD_64 *)iv)[i]  = key_iv[SIMD_COEF_64*(sizeof(key)/sizeof(ARCH_WORD_64) + i) + index2];
+				((ARCH_WORD_64 *)iv)[i]  = JOHNSWAP64(key_iv[SIMD_COEF_64*(sizeof(key)/sizeof(ARCH_WORD_64) + i) + (index2&(SIMD_COEF_64-1)) + index2/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64]);
 
-			/* NOTE: write our code instead of using following high-level OpenSSL functions */
-			EVP_CIPHER_CTX_init(&ctx);
-			fOk = EVP_DecryptInit_ex(&ctx, EVP_aes_256_cbc(), NULL, key, iv);
-			if (fOk)
-				fOk = EVP_DecryptUpdate(&ctx, output, &nPLen, cur_salt->cry_master, cur_salt->cry_master_length);
-			if (fOk)
-				fOk = EVP_DecryptFinal_ex(&ctx, output + nPLen, &nFLen);
-			EVP_CIPHER_CTX_cleanup(&ctx);
-			// a decrypted mkey is exactly 32 bytes in len; ossl has already checked the padding (16 0x0f's) for us
-			if (fOk && nPLen + nFLen == 32) {
+			AES_set_decrypt_key(key, 256, &aes_key);
+			AES_cbc_encrypt(cur_salt->cry_master, output, cur_salt->cry_master_length, &aes_key, iv, AES_DECRYPT);
+
+			if (check_pkcs_pad(output, cur_salt->cry_master_length, 16) == 32) {
 				cracked[index + index2] = 1;
 #ifdef _OPENMP
 #pragma omp atomic
 #endif
 				any_cracked |= 1;
 			}
-
 		}
 #else
+		AES_KEY aes_key;
 		unsigned char key_iv[SHA512_DIGEST_LENGTH];  // buffer for both the derived key and iv
+
 		SHA512_Init(&sha_ctx);
 		SHA512_Update(&sha_ctx, saved_key[index], strlen(saved_key[index]));
 		SHA512_Update(&sha_ctx, cur_salt->cry_salt, cur_salt->cry_salt_length);
@@ -339,16 +342,11 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 			SHA512_Update(&sha_ctx, key_iv, SHA512_DIGEST_LENGTH);
 			SHA512_Final(key_iv, &sha_ctx);
 		}
-		/* NOTE: write our code instead of using following high-level OpenSSL functions */
-		EVP_CIPHER_CTX_init(&ctx);
-		fOk = EVP_DecryptInit_ex(&ctx, EVP_aes_256_cbc(), NULL, key_iv, key_iv+32);
-		if (fOk)
-			fOk = EVP_DecryptUpdate(&ctx, output, &nPLen, cur_salt->cry_master, cur_salt->cry_master_length);
-		if (fOk)
-			fOk = EVP_DecryptFinal_ex(&ctx, output + nPLen, &nFLen);
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		// a decrypted mkey is exactly 32 bytes in len; ossl has already checked the padding (16 0x0f's) for us
-		if (fOk && nPLen + nFLen == 32) {
+
+		AES_set_decrypt_key(key_iv, 256, &aes_key);
+		AES_cbc_encrypt(cur_salt->cry_master, output, cur_salt->cry_master_length, &aes_key, key_iv + 32, AES_DECRYPT);
+
+		if (check_pkcs_pad(output, cur_salt->cry_master_length, 16) == 32) {
 			cracked[index] = 1;
 #ifdef _OPENMP
 #pragma omp atomic
@@ -389,7 +387,6 @@ static char *get_key(int index)
 	return saved_key[index];
 }
 
-#if FMT_MAIN_VERSION
 static unsigned int iteration_count(void *salt)
 {
 	struct custom_salt *my_salt;
@@ -397,7 +394,6 @@ static unsigned int iteration_count(void *salt)
 	my_salt = salt;
 	return (unsigned int)my_salt->cry_rounds;
 }
-#endif
 
 struct fmt_main fmt_bitcoin = {
 	{
@@ -415,29 +411,23 @@ struct fmt_main fmt_bitcoin = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		bitcoin_tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid,
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 9
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
-#endif
 		{
 			fmt_default_binary_hash
 		},
@@ -458,5 +448,3 @@ struct fmt_main fmt_bitcoin = {
 };
 
 #endif /* plugin stanza */
-
-#endif /* OpenSSL requirement */

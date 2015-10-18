@@ -27,6 +27,7 @@
 #if defined (_MSC_VER) && !defined (MEMDBG_ON)
 #define malloc(a) _aligned_malloc(a,16)
 #define realloc(a,b) _aligned_realloc(a,b,16)
+#define calloc(a,b) memset(_aligned_malloc(a*b,16),0,a*b)
 #define free(a) _aligned_free(a)
 char *strdup_MSVC(const char *str)
 {
@@ -89,7 +90,7 @@ void *mem_alloc_func(size_t size
 	res = malloc(size);
 #endif
 	if (!res) {
-		fprintf(stderr, "mem_alloc(): %s trying to allocate %zd bytes\n", strerror(ENOMEM), size);
+		fprintf(stderr, "mem_alloc(): %s trying to allocate "Zu" bytes\n", strerror(ENOMEM), size);
 		error();
 	}
 
@@ -102,14 +103,21 @@ void *mem_calloc_func(size_t count, size_t size
 #endif
 	)
 {
-	char *res;
-	size *= count;
+	void *res;
+
+	if (!count || !size) return NULL;
 #if defined (MEMDBG_ON)
+	size *= count;
 	res = (char*) MEMDBG_alloc(size, file, line);
-#else
-	res = (char*) mem_alloc(size);
-#endif
 	memset(res, 0, size);
+#else
+	res = calloc(count, size);
+#endif
+	if (!res) {
+		fprintf(stderr, "mem_calloc(): %s trying to allocate "Zu" bytes\n", strerror(ENOMEM), count * size);
+		error();
+	}
+
 	return res;
 }
 
@@ -117,6 +125,8 @@ void *mem_calloc_func(size_t count, size_t size
  * if -DDEBUG we turn mem_alloc_tiny() to essentially be just a malloc()
  * with additional alignment. The reason for this is it's way easier to
  * trace bugs that way.
+ * Also, with -DDEBUG or -DMEMDBG we always return exactly the requested
+ * alignment, in order to trigger bugs!
  */
 #ifdef DEBUG
 #undef  MEM_ALLOC_SIZE
@@ -133,6 +143,9 @@ void *mem_alloc_tiny_func(size_t size, size_t align
 	size_t mask;
 	char *p;
 
+#if defined(DEBUG) || defined(MEMDBG)
+	size += align;
+#endif
 #ifdef DEBUG
 	/*
 	 * We may be called with size zero, for example from ldr_load_pw_line()
@@ -164,6 +177,11 @@ void *mem_alloc_tiny_func(size_t size, size_t align
 				p -= (size_t)p & mask;
 				bufree -= need;
 				buffer = p + size;
+#if defined(DEBUG) || defined(MEMDBG)
+				/* Ensure alignment is no better than requested */
+				if (((size_t)p & ((mask << 1) + 1)) == 0)
+					p += align;
+#endif
 				return p;
 			}
 		}
@@ -188,6 +206,11 @@ void *mem_alloc_tiny_func(size_t size, size_t align
 	add_memory_link((void*)p);
 	p += mask;
 	p -= (size_t)p & mask;
+#if defined(DEBUG) || defined(MEMDBG)
+	/* Ensure alignment is no better than requested */
+	if (((size_t)p & ((mask << 1) + 1)) == 0)
+		p += align;
+#endif
 	return p;
 }
 
@@ -228,24 +251,28 @@ void *mem_alloc_align_func(size_t size, size_t align
 	ptr = (char*) MEMDBG_alloc_align(size, align, file, line);
 #elif HAVE_POSIX_MEMALIGN
 	if (posix_memalign(&ptr, align, size))
-		pexit("posix_memalign (%zu bytes)", size);
+		pexit("posix_memalign ("Zu" bytes)", size);
 #elif HAVE_ALIGNED_ALLOC
 	/* According to the Linux man page, "size should be a multiple of
 	   alignment", whatever they mean with "should"... This does not
 	   make any sense whatsoever but we round it up to comply. */
 	size = ((size + (align - 1)) / align) * align;
 	if (!(ptr = aligned_alloc(align, size)))
-		pexit("aligned_alloc (%zu bytes)", size);
+		pexit("aligned_alloc ("Zu" bytes)", size);
 #elif HAVE_MEMALIGN
 	/* Let's just pray this implementation can actually free it */
+#if defined(__sparc__) || defined(__sparc) || defined(sparc) || defined(__sparcv9)
+	if (!(ptr = memalign(align, size)))
+#else
 	if (!(ptr = memalign(&ptr, align, size)))
-		pexit("memalign (%zu bytes)", size);
+#endif
+		pexit("memalign ("Zu" bytes)", size);
 #elif HAVE___MINGW_ALIGNED_MALLOC
 	if (!(ptr = __mingw_aligned_malloc(size, align)))
-		pexit("__mingw_aligned_malloc (%zu bytes)", size);
+		pexit("__mingw_aligned_malloc (%u bytes)", (unsigned)size);
 #elif HAVE__ALIGNED_MALLOC
 	if (!(ptr = _aligned_malloc(size, align)))
-		pexit("_aligned_malloc (%zu bytes)", size);
+		pexit("_aligned_malloc ("Zu" bytes)", size);
 
 #elif AC_BUILT
 #error No suitable alligned alloc found, please report to john-dev mailing list (state your OS details).
@@ -254,10 +281,10 @@ void *mem_alloc_align_func(size_t size, size_t align
 #elif _ISOC11_SOURCE
 	size = ((size + (align - 1)) / align) * align;
 	if (!(ptr = aligned_alloc(align, size)))
-		pexit("aligned_alloc (%zu bytes)", size);
+		pexit("aligned_alloc ("Zu" bytes)", size);
 #else
 	if (posix_memalign(&ptr, align, size))
-		pexit("posix_memalign (%zu bytes)", size);
+		pexit("posix_memalign ("Zu" bytes)", size);
 #endif
 	return ptr;
 }
@@ -294,16 +321,6 @@ char *str_alloc_copy_func(char *src
 #else
 	return (char *)memcpy(mem_alloc_tiny(size, MEM_ALIGN_NONE), src, size);
 #endif
-}
-
-/* if we stipulate that align must be 1<<x (i.e. base 2), %align can be
-   replaced with &(align-1) */
-void *mem_align(void *stack_ptr, int align) {
-	char *cp_align = (char*)stack_ptr;
-
-	cp_align += (align-1);
-	cp_align -= (size_t)cp_align % align;
-	return (void*)cp_align;
 }
 
 void dump_text(void *in, int len)
@@ -395,7 +412,7 @@ void alter_endianity(void *_x, unsigned int size) {
 #endif
 }
 
-#if defined(SIMD_COEF_32) || defined(NT_X86_64) || defined (MD5_SSE_PARA) || defined (MD4_SSE_PARA) || defined (SHA1_SSE_PARA)
+#if defined(SIMD_COEF_32) || defined(NT_X86_64) || defined (SIMD_PARA_MD5) || defined (SIMD_PARA_MD4) || defined (SIMD_PARA_SHA1)
 #ifndef SIMD_COEF_32
 #define SIMD_COEF_32	4
 #endif
@@ -462,8 +479,8 @@ void dump_out_mmx_msg_sepline(const void *msg, void *buf, unsigned int size, uns
 	dump_out_mmx(buf, size, index);
 }
 
-#if defined (MD5_SSE_PARA)
-#define GETPOSMPARA(i, index)	( (index&(SIMD_COEF_32-1))*4 + (((i)&(0xffffffff-3))%64)*SIMD_COEF_32 + (i/64)*SIMD_COEF_32*MD5_SSE_PARA*64 +    ((i)&3)  + (unsigned int)index/SIMD_COEF_32*64*SIMD_COEF_32  )
+#if defined (SIMD_PARA_MD5)
+#define GETPOSMPARA(i, index)	( (index&(SIMD_COEF_32-1))*4 + (((i)&(0xffffffff-3))%64)*SIMD_COEF_32 + (i/64)*SIMD_COEF_32*SIMD_PARA_MD5*64 +    ((i)&3)  + (unsigned int)index/SIMD_COEF_32*64*SIMD_COEF_32  )
 // multiple para blocks
 void dump_stuff_mpara_mmx_noeol(void *buf, unsigned int size, unsigned int index) {
 	unsigned int i;

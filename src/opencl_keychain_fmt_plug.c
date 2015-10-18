@@ -23,8 +23,10 @@ john_register_one(&fmt_opencl_keychain);
 #include "arch.h"
 #include "formats.h"
 #include "common.h"
+#include "stdint.h"
 #include "misc.h"
 #include "options.h"
+#include "jumbo.h"
 #include "common-opencl.h"
 
 #define FORMAT_LABEL		"keychain-opencl"
@@ -41,14 +43,10 @@ john_register_one(&fmt_opencl_keychain);
 #define PLAINTEXT_LENGTH	64
 #define SALT_SIZE		sizeof(*salt_struct)
 #define BINARY_ALIGN		MEM_ALIGN_WORD
-#define SALT_ALIGN		MEM_ALIGN_WORD
+#define SALT_ALIGN		4
 #define SALTLEN 20
 #define IVLEN 8
 #define CTLEN 48
-
-#define uint8_t			unsigned char
-#define uint16_t		unsigned short
-#define uint32_t		ARCH_WORD_32
 
 typedef struct {
 	uint32_t length;
@@ -60,10 +58,10 @@ typedef struct {
 } keychain_hash;
 
 typedef struct {
-	uint8_t  length;
-	uint8_t  salt[SALTLEN];
 	uint32_t iterations;
 	uint32_t outlen;
+	uint8_t  length;
+	uint8_t  salt[SALTLEN];
 } keychain_salt;
 
 static int *cracked;
@@ -94,9 +92,6 @@ static cl_mem mem_in, mem_out, mem_setting;
 
 size_t insize, outsize, settingsize, cracked_size;
 
-#define MIN(a, b)               (((a) > (b)) ? (b) : (a))
-#define MAX(a, b)               (((a) > (b)) ? (a) : (b))
-
 #define STEP			0
 #define SEED			256
 
@@ -112,20 +107,6 @@ static const char * warn[] = {
 static size_t get_task_max_work_group_size()
 {
 	return autotune_get_task_max_work_group_size(FALSE, 0, crypt_kernel);
-}
-
-static size_t get_task_max_size()
-{
-	return 0;
-}
-
-static size_t get_default_workgroup()
-{
-	if (cpu(device_info[gpu_id]))
-		return get_platform_vendor_id(platform_id) == DEV_INTEL ?
-			8 : 1;
-	else
-		return 64;
 }
 
 static void create_clobj(size_t gws, struct fmt_main *self)
@@ -163,44 +144,51 @@ static void create_clobj(size_t gws, struct fmt_main *self)
 
 static void release_clobj(void)
 {
-	HANDLE_CLERROR(clReleaseMemObject(mem_in), "Release mem in");
-	HANDLE_CLERROR(clReleaseMemObject(mem_setting), "Release mem setting");
-	HANDLE_CLERROR(clReleaseMemObject(mem_out), "Release mem out");
+	if (cracked) {
+		HANDLE_CLERROR(clReleaseMemObject(mem_in), "Release mem in");
+		HANDLE_CLERROR(clReleaseMemObject(mem_setting), "Release mem setting");
+		HANDLE_CLERROR(clReleaseMemObject(mem_out), "Release mem out");
 
-	MEM_FREE(inbuffer);
-	MEM_FREE(outbuffer);
-	MEM_FREE(cracked);
+		MEM_FREE(inbuffer);
+		MEM_FREE(outbuffer);
+		MEM_FREE(cracked);
+	}
 }
 
 static void done(void)
 {
-	release_clobj();
+	if (autotuned) {
+		release_clobj();
 
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+		HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
+		HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+
+		autotuned--;
+	}
 }
 
 static void init(struct fmt_main *_self)
 {
-	char build_opts[64];
-
 	self = _self;
-
-	snprintf(build_opts, sizeof(build_opts),
-	         "-DKEYLEN=%d -DSALTLEN=%d -DOUTLEN=%d",
-	         PLAINTEXT_LENGTH,
-	         (int)sizeof(currentsalt.salt),
-	         (int)sizeof(outbuffer->v));
-	opencl_init("$JOHN/kernels/pbkdf2_hmac_sha1_unsplit_kernel.cl",
-	                gpu_id, build_opts);
-
-	crypt_kernel = clCreateKernel(program[gpu_id], "derive_key", &cl_error);
-	HANDLE_CLERROR(cl_error, "Error creating kernel");
+	opencl_prepare_dev(gpu_id);
 }
 
 static void reset(struct db_main *db)
 {
-	if (!db) {
+	if (!autotuned) {
+		char build_opts[64];
+
+		snprintf(build_opts, sizeof(build_opts),
+		         "-DKEYLEN=%d -DSALTLEN=%d -DOUTLEN=%d",
+		         PLAINTEXT_LENGTH,
+		         (int)sizeof(currentsalt.salt),
+		         (int)sizeof(outbuffer->v));
+		opencl_init("$JOHN/kernels/pbkdf2_hmac_sha1_unsplit_kernel.cl",
+		            gpu_id, build_opts);
+
+		crypt_kernel = clCreateKernel(program[gpu_id], "derive_key", &cl_error);
+		HANDLE_CLERROR(cl_error, "Error creating kernel");
+
 		// Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 1, self,
 		                       create_clobj, release_clobj,
@@ -221,15 +209,15 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	ctcopy += 11;
 	if ((p = strtokm(ctcopy, "*")) == NULL)	/* salt */
 		goto err;
-	if(strlen(p) != SALTLEN * 2)
+	if(hexlenl(p) != SALTLEN * 2)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* iv */
 		goto err;
-	if(strlen(p) != IVLEN * 2)
+	if(hexlenl(p) != IVLEN * 2)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* ciphertext */
 		goto err;
-	if(strlen(p) != CTLEN * 2)
+	if(hexlenl(p) != CTLEN * 2)
 		goto err;
 
 	MEM_FREE(keeptr);
@@ -246,8 +234,10 @@ static void *get_salt(char *ciphertext)
 	char *keeptr = ctcopy;
 	int i;
 	char *p;
+	static struct custom_salt *salt_struct;
 
-	salt_struct = mem_calloc_tiny(sizeof(struct custom_salt),
+	if (!salt_struct)
+		salt_struct = mem_calloc_tiny(sizeof(struct custom_salt),
 	                              MEM_ALIGN_WORD);
 	ctcopy += 11;	/* skip over "$keychain$*" */
 	p = strtokm(ctcopy, "*");
@@ -301,7 +291,6 @@ static char *get_key(int index)
 static int kcdecrypt(unsigned char *key, unsigned char *iv, unsigned char *data)
 {
 	unsigned char out[CTLEN];
-	int pad, n, i;
 	DES_cblock key1, key2, key3;
 	DES_cblock ivec;
 	DES_key_schedule ks1, ks2, ks3;
@@ -315,18 +304,10 @@ static int kcdecrypt(unsigned char *key, unsigned char *iv, unsigned char *data)
 	memcpy(ivec, iv, 8);
 	DES_ede3_cbc_encrypt(data, out, CTLEN, &ks1, &ks2, &ks3, &ivec,  DES_DECRYPT);
 
-	// now check padding
-	pad = out[47];
-	if(pad > 8)
-		// "Bad padding byte. You probably have a wrong password"
+	/* possible bug here, is this assumption (pad of 4) always valid? */
+	if (out[47] != 4 || check_pkcs_pad(out, CTLEN, 8) < 0)
 		return -1;
-	if(pad != 4) /* possible bug here, is this assumption always valid? */
-		return -1;
-	n = CTLEN - pad;
-	for(i = n; i < CTLEN; i++)
-		if(out[i] != pad)
-			// "Bad padding. You probably have a wrong password"
-			return -1;
+
 	return 0;
 }
 
@@ -347,7 +328,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	int index;
 	size_t *lws = local_work_size ? &local_work_size : NULL;
 
-	global_work_size = local_work_size ? (count + local_work_size - 1) / local_work_size * local_work_size : count;
+	global_work_size = GET_MULTIPLE_OR_BIGGER(count, local_work_size);
 
 	if (any_cracked) {
 		memset(cracked, 0, cracked_size);
@@ -355,18 +336,21 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	}
 
 	/// Copy data to gpu
-	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], mem_in, CL_FALSE, 0,
+	BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], mem_in, CL_FALSE, 0,
 		insize, inbuffer, 0, NULL, multi_profilingEvent[0]),
 	        "Copy data to gpu");
 
 	/// Run kernel
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1,
+	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1,
 		NULL, &global_work_size, lws, 0, NULL,
 	        multi_profilingEvent[1]), "Run kernel");
 
 	/// Read the result back
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], mem_out, CL_TRUE, 0,
+	BENCH_CLERROR(clEnqueueReadBuffer(queue[gpu_id], mem_out, CL_TRUE, 0,
 		outsize, outbuffer, 0, NULL, multi_profilingEvent[2]), "Copy result back");
+
+	if (ocl_autotune_running)
+		return count;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -416,9 +400,7 @@ struct fmt_main fmt_opencl_keychain = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_NOT_EXACT,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		keychain_tests
 	}, {
 		init,
@@ -429,9 +411,7 @@ struct fmt_main fmt_opencl_keychain = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

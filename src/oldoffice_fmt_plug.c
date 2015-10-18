@@ -31,7 +31,9 @@ john_register_one(&fmt_oldoffice);
 #include "unicode.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               256
+#endif
 #endif
 #include "memdbg.h"
 
@@ -142,21 +144,17 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		goto error;
 	if (!(ptr = strtokm(NULL, "*"))) /* salt */
 		goto error;
-	if (strlen(ptr) != 32)
-		goto error;
-	if (!ishex(ptr))
+	if (hexlen(ptr) != 32)
 		goto error;
 	if (!(ptr = strtokm(NULL, "*"))) /* verifier */
 		goto error;
-	if (strlen(ptr) != 32)
-		goto error;
-	if (!ishex(ptr))
+	if (hexlen(ptr) != 32)
 		goto error;
 	if (!(ptr = strtokm(NULL, "*"))) /* verifier hash */
 		goto error;
-	if (strlen(ptr) != 32 && strlen(ptr) != 40)
+	if (res < 3 && hexlen(ptr) != 32)
 		goto error;
-	if (!ishex(ptr))
+	if (res >= 3 && hexlen(ptr) != 40)
 		goto error;
 	MEM_FREE(keeptr);
 	return 1;
@@ -406,7 +404,6 @@ static char *get_key(int index)
 	return (char*)utf16_to_enc(saved_key[index]);
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int oo_hash_type(void *salt)
 {
 	struct custom_salt *my_salt;
@@ -414,7 +411,6 @@ static unsigned int oo_hash_type(void *salt)
 	my_salt = salt;
 	return (unsigned int) my_salt->type;
 }
-#endif
 
 struct fmt_main fmt_oldoffice = {
 	{
@@ -432,11 +428,9 @@ struct fmt_main fmt_oldoffice = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_UNICODE | FMT_UTF8 | FMT_SPLIT_UNIFIES_CASE,
-#if FMT_MAIN_VERSION > 11
 		{
 			"hash type",
 		},
-#endif
 		oo_tests
 	}, {
 		init,
@@ -447,11 +441,9 @@ struct fmt_main fmt_oldoffice = {
 		split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			oo_hash_type,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

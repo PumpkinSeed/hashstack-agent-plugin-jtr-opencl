@@ -10,16 +10,16 @@
  * There's ABSOLUTELY NO WARRANTY, express or implied.
  */
 
-/* NOTE, _POSIX_SOURCE fuk's up solaris 32 bit 64 bit processing!!! */
-#ifndef sparc
-#define _POSIX_SOURCE /* for fileno(3) */
-#endif
-
 #include <stdio.h>
 #include <sys/stat.h>
 
 #if AC_BUILT
 #include "autoconfig.h"
+#else
+#ifndef sparc
+#undef _POSIX_SOURCE
+#define _POSIX_SOURCE /* for fileno(3) */
+#endif
 #endif
 
 #include "os.h"
@@ -47,7 +47,7 @@
 #if _MSC_VER || __MINGW32__ || __MINGW64__ || __CYGWIN__ || HAVE_WINDOWS_H
 #include "win32_memmap.h"
 #undef MEM_FREE
-#ifndef __CYGWIN__
+#if !defined(__CYGWIN__) && !defined(__MINGW64__)
 #include "mmap-windows.c"
 #endif /* __CYGWIN */
 #endif /* _MSC_VER ... */
@@ -86,7 +86,11 @@
 #define _STR_VALUE(arg)         #arg
 #define STR_MACRO(n)            _STR_VALUE(n)
 
+#if defined(SIMD_COEF_32)
 #define VSCANSZ                 (SIMD_COEF_32 * 4)
+#else
+#define VSCANSZ                 0
+#endif
 
 static int dist_rules;
 
@@ -108,6 +112,9 @@ static char *mem_map, *map_pos, *map_end, *map_scan_end;
 // used for file in 'memory buffer' mode (ready to use array)
 static char *word_file_str, **words;
 static int64_t nWordFileLines;
+
+// Used for freezing fix_state while in hybrid Regex
+static int freeze_state;
 
 static void save_state(FILE *file)
 {
@@ -133,8 +140,8 @@ static MAYBE_INLINE char *mgetl(char *res)
 {
 	char *pos = res;
 
-#if defined(SIMD_COEF_32) && !defined(_MSC_VER) && \
-	!((__AVX512F__ && !__AVX512BW__) || __MIC__)
+#if defined(vcmpeq_epi8_mask) && !defined(_MSC_VER) && \
+	!VLOADU_EMULATED && !VSTOREU_EMULATED
 
 	/* 16/32/64 chars at a time with known remainder. */
 	const vtype vnl = vset1_epi8('\n');
@@ -312,6 +319,9 @@ static int fix_state_delay;
 
 static void fix_state(void)
 {
+	if (freeze_state)
+		return;
+
 	if (++fix_state_delay < options.max_fix_state_delay)
 		return;
 	fix_state_delay=0;
@@ -369,7 +379,7 @@ static double get_progress(void)
 		}
 	}
 #if 0
-	fprintf(stderr, "rule %d/%d mask %llu pos %llu/%llu\n",
+	fprintf(stderr, "rule %d/%d mask "LLu" pos "LLu"/"LLu"\n",
 	        rule_number, rule_count, mask_mult, pos, size);
 #endif
 	return (100.0 * ((rule_number * size * mask_mult) + pos * mask_mult) /
@@ -525,8 +535,9 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules)
 	long my_size = 0;
 	unsigned int myWordFileLines = 0;
 	int maxlength = options.force_maxlength;
-	int minlength = (options.force_minlength >= 0) ?
-		options.force_minlength : 0;
+	int minlength = (options.req_minlength >= 0) ?
+		options.req_minlength : 0;
+	int rules_length;
 #if HAVE_REXGEN
 	char *regex_alpha = 0;
 	int regex_case = 0;
@@ -546,19 +557,22 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules)
 	length = db->format->params.plaintext_length - mask_add_len;
 	if (mask_num_qw > 1)
 		length /= mask_num_qw;
+
+	/* rules.c honors -min/max-len options on its own */
+	rules_length = length;
+
 	if (maxlength && maxlength < length)
 		length = maxlength;
 
 	/* If we did not give a name for loopback mode,
 	   we use the active pot file */
-	if (loopBack) {
-		dupeCheck = 1;
-		if (!name)
-			name = options.wordlist = pers_opts.activepot;
-	}
+	if (loopBack && !name)
+		name = options.wordlist = pers_opts.activepot;
 
-	if (!mem_saving_level &&
-	    (dupeCheck || !options.max_wordfile_memory))
+	/* These will ignore --save-memory */
+	if (loopBack || dupeCheck ||
+	    (!options.max_wordfile_memory &&
+	     (options.flags & FLG_RULES)))
 		forceLoad = 1;
 
 	/* If we did not give a name for wordlist mode,
@@ -590,29 +604,34 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules)
 		}
 
 #ifdef HAVE_MMAP
-		log_event("- memory mapping wordlist ("LLd" bytes)",
-		          (long long)file_len);
+		if (cfg_get_bool(SECTION_OPTIONS, NULL, "WordlistMemoryMap", 1))
+		{
+			log_event("- memory mapping wordlist ("LLd" bytes)",
+			          (long long)file_len);
 #if (SIZEOF_SIZE_T < 8)
-		/* Now even though we are 64 bit file size, we must still
-		 * deal with some 32 bit functions ;) */
-		mem_map = MAP_FAILED;
-		if (file_len < ((1LL)<<32))
+/*
+ * Now even though we are 64 bit file size, we must still deal with some
+ * 32 bit functions ;)
+ */
+			mem_map = MAP_FAILED;
+			if (file_len < ((1LL)<<32))
 #endif
-		mem_map = mmap(NULL, file_len,
-		               PROT_READ, MAP_SHARED,
-		               fileno(word_file), 0);
-		if (mem_map == MAP_FAILED) {
-			mem_map = NULL;
+			mem_map = mmap(NULL, file_len,
+			               PROT_READ, MAP_SHARED,
+			               fileno(word_file), 0);
+			if (mem_map == MAP_FAILED) {
+				mem_map = NULL;
 #ifdef DEBUG
-			fprintf(stderr, "wordlist: memory mapping failed (%s) (non-fatal)\n",
-			        strerror(errno));
+				fprintf(stderr, "wordlist: memory mapping failed (%s) (non-fatal)\n",
+				        strerror(errno));
 #endif
-			log_event("- memory mapping failed (%s) - but we'll do "
-			          "fine without it.", strerror(errno));
-		} else {
-			map_pos = mem_map;
-			map_end = mem_map + file_len;
-			map_scan_end = map_end - VSCANSZ;
+				log_event("- memory mapping failed (%s) - but we'll do fine without it.",
+				          strerror(errno));
+			} else {
+				map_pos = mem_map;
+				map_end = mem_map + file_len;
+				map_scan_end = map_end - VSCANSZ;
+			}
 		}
 #endif
 
@@ -621,17 +640,15 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules)
 			(options.node_max - options.node_min + 1)
 			: file_len;
 
-		if (ourshare < options.max_wordfile_memory)
+		if (ourshare < options.max_wordfile_memory &&
+		    mem_saving_level < 2 &&
+		    (options.flags & FLG_RULES))
 			forceLoad = 1;
 
 		/* If it's worth it we make a ready-to-use buffer with the
 		   (possibly converted) contents ready to use as an array.
 		   Disabled for external filter - it would trash the buffer. */
-		if (!(options.flags & FLG_EXTERNAL_CHK) && !mem_saving_level)
-		if (dupeCheck || options.flags & FLG_RULES)
-		if (forceLoad || (options.node_count > 1 &&
-		     file_len > options.node_count * (length * 100) &&
-		     ourshare < options.max_wordfile_memory)) {
+		if (!(options.flags & FLG_EXTERNAL_CHK) && forceLoad) {
 			char *aep;
 
 			// Load only this node's share of words to memory
@@ -771,6 +788,7 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules)
 					hash_log++;
 				hash_size = (1 << hash_log);
 				hash_mask = (hash_size - 1);
+				if (options.verbosity > 3)
 				log_event("- dupe suppression: hash size %u, "
 					"temporarily allocating "LLd" bytes",
 					hash_size,
@@ -887,6 +905,7 @@ GRAB_NEXT_PIPE_LOAD:;
 			{
 				char *cpi, *cpe;
 
+				if (options.verbosity > 3)
 				log_event("- Reading next block of candidate passwords from stdin pipe");
 
 				rules = rules_keep;
@@ -930,10 +949,12 @@ GRAB_NEXT_PIPE_LOAD:;
 						}
 					}
 				}
-				sprintf(msg_buf, "- Read block of "LLd" "
-				        "candidate passwords from pipe",
-				        (long long)nWordFileLines);
-				log_event("%s", msg_buf);
+				if (options.verbosity > 3) {
+					sprintf(msg_buf, "- Read block of "LLd" "
+					        "candidate passwords from pipe",
+					        (long long)nWordFileLines);
+					log_event("%s", msg_buf);
+				}
 			}
 #if HAVE_WINDOWS_H
 			goto SKIP_MEM_MAP_LOAD;
@@ -941,6 +962,7 @@ MEM_MAP_LOAD:;
 			{
 				rules = rules_keep;
 				nWordFileLines = 0;
+				if (options.verbosity > 3)
 				log_event("- Reading next block of candidate from the memory mapped file");
 				release_sharedmem_object(pIPC);
 				pIPC = next_sharedmem_object();
@@ -975,9 +997,7 @@ REDO_AFTER_LMLOOP:
 			error();
 		}
 
-		/* rules.c honors -min/max-len options on its own */
-		rules_init(pers_opts.internal_enc == pers_opts.target_enc ?
-		           length : db->format->params.plaintext_length);
+		rules_init(rules_length);
 		rule_count = rules_count(&ctx, -1);
 
 		if (do_lmloop || !db->plaintexts->head)
@@ -1081,18 +1101,18 @@ REDO_AFTER_LMLOOP:
 			}
 			if ((rule = rules_reject(prerule, -1, last, db))) {
 				if (strcmp(prerule, rule)) {
-					if (options.verbosity > 2)
+					if (options.verbosity > 3)
 					log_event("- Rule #%d: '%.100s'"
 						" accepted as '%.100s'",
 						rule_number + 1, prerule, rule);
 				} else {
-					if (options.verbosity > 2)
+					if (options.verbosity > 3)
 					log_event("- Rule #%d: '%.100s'"
 						" accepted",
 						rule_number + 1, prerule);
 				}
 			} else {
-				if (options.verbosity > 2)
+				if (options.verbosity > 3)
 				log_event("- Rule #%d: '%.100s' rejected",
 					rule_number + 1, prerule);
 				goto next_rule;
@@ -1125,13 +1145,23 @@ REDO_AFTER_LMLOOP:
 						break;
 					}
 				} else
-				if (ext_filter(word))
-				if (
 #if HAVE_REXGEN
-				    regex ?
-				    do_regex_crack_as_rules(regex, word, regex_case, regex_alpha) :
+				if (regex) {
+					freeze_state = 1;
+					if (do_regex_hybrid_crack(db, regex,
+					                          word,
+					                          regex_case,
+					                          regex_alpha)) {
+						rule = NULL;
+						rules = 0;
+						pipe_input = 0;
+						break;
+					}
+					freeze_state = 0;
+				} else
 #endif
-				    crk_process_key(word)) {
+				if (ext_filter(word))
+				if (crk_process_key(word)) {
 					rule = NULL;
 					rules = 0;
 					pipe_input = 0;
@@ -1171,13 +1201,23 @@ REDO_AFTER_LMLOOP:
 						break;
 					}
 				} else
-				if (ext_filter(word))
-				if (
 #if HAVE_REXGEN
-				    regex!=NULL ?
-					do_regex_crack_as_rules(regex, word, regex_case, regex_alpha) :
+				if (regex) {
+					freeze_state = 1;
+					if (do_regex_hybrid_crack(db, regex,
+					                          word,
+					                          regex_case,
+					                          regex_alpha)) {
+						rule = NULL;
+						rules = 0;
+						pipe_input = 0;
+						break;
+					}
+					freeze_state = 0;
+				} else
 #endif
-				    crk_process_key(word)) {
+				if (ext_filter(word))
+				if (crk_process_key(word)) {
 					rules = 0;
 					pipe_input = 0;
 					break;
@@ -1227,13 +1267,23 @@ process_word:
 							break;
 						}
 					} else
-					if (ext_filter(word))
-					if (
 #if HAVE_REXGEN
-					    regex != NULL ?
-						do_regex_crack_as_rules(regex, word, regex_case, regex_alpha) :
+					if (regex) {
+						freeze_state = 1;
+						if (do_regex_hybrid_crack(
+							    db, regex, word,
+							    regex_case,
+							    regex_alpha)) {
+							rule = NULL;
+							rules = 0;
+							pipe_input = 0;
+							break;
+						}
+						freeze_state = 0;
+					} else
 #endif
-						crk_process_key(word)) {
+					if (ext_filter(word))
+					if (crk_process_key(word)) {
 						rules = 0;
 						pipe_input = 0;
 						break;
@@ -1309,6 +1359,8 @@ next_rule:
 	if (name) {
 		if (!event_abort)
 			progress = 100;
+		else
+			progress = get_progress();
 
 		MEM_FREE(words);
 #ifdef HAVE_MMAP

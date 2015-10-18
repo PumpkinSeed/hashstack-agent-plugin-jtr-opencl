@@ -19,7 +19,9 @@ john_register_one(&fmt_cryptsha1);
 
 #include <string.h>
 #ifdef _OPENMP
-#define OMP_SCALE                   16 // untested
+#ifndef OMP_SCALE
+#define OMP_SCALE                   32 // tuned on core i7 w/ HT
+#endif
 #include <omp.h>
 #endif
 
@@ -55,7 +57,7 @@ john_register_one(&fmt_cryptsha1);
 #define SALT_ALIGN                  4
 
 #ifdef SIMD_COEF_32
-#define MIN_KEYS_PER_CRYPT      SIMD_COEF_32
+#define MIN_KEYS_PER_CRYPT      SSE_GROUP_SZ_SHA1
 #define MAX_KEYS_PER_CRYPT      SSE_GROUP_SZ_SHA1
 #else
 #define MIN_KEYS_PER_CRYPT      1
@@ -103,13 +105,13 @@ static void done(void)
 	MEM_FREE(saved_key);
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 
 static void set_key(char *key, int index)
@@ -193,7 +195,7 @@ static int cmp_all(void *binary, int count)
 #if defined(_OPENMP) || MAX_KEYS_PER_CRYPT > 1
 	for (; index < count; index++)
 #endif
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -222,13 +224,11 @@ static int salt_hash(void *salt)
 	return hash & (SALT_HASH_SIZE - 1);
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int iteration_count(void *salt)
 {
 	struct saltstruct *p = (struct saltstruct *)salt;
 	return p->rounds;
 }
-#endif
 
 struct fmt_main fmt_cryptsha1 = {
 	{
@@ -246,11 +246,9 @@ struct fmt_main fmt_cryptsha1 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		sha1crypt_common_tests
 	}, {
 		init,
@@ -261,11 +259,9 @@ struct fmt_main fmt_cryptsha1 = {
 		fmt_default_split,
 		sha1crypt_common_get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

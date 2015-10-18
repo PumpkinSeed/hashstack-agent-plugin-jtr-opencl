@@ -8,11 +8,16 @@
  * 2. krbng2john.py ~/capture.pdml > krb5.in
  * 3. Run john on krb5.in
  *
- * Legacy input format:
- * user:$mskrb5$user$realm$checksum$timestamp
+ * PA_DATA_ENC_TIMESTAMP = Checksum[16 bytes] . Enc_Timestamp[36 bytes]
+ *                          -> encode as:
+ *                         HexChecksum[32 chars], HexTimestamp[72 chars]
  *
- * New input format from krbpa2john.py (the above is still supported)
- * user:$krb5pa$etype$user$realm$salt$timestamp+checksum
+ * Legacy input format:
+ *   user:$mskrb5$user$realm$HexChecksum$HexTimestamp
+ *
+ * New input format from krbpa2john.py (the above is still supported),
+ * note the lack of a separator between HexTimestamp and HexChecksum:
+ *   user:$krb5pa$etype$user$realm$salt$HexTimestampHexChecksum
  *
  * user, realm and salt are unused in this format.
  *
@@ -94,9 +99,9 @@ john_register_one(&fmt_mskrb5);
 #define MIN_KEYS_PER_CRYPT 1
 #define MAX_KEYS_PER_CRYPT 1
 
+#ifndef OMP_SCALE
 #define OMP_SCALE          1024
-
-#define HEXCHARS           "0123456789abcdefABCDEF"
+#endif
 
 // Second and third plaintext will be replaced in init() under come encodings
 static struct fmt_tests tests[] = {
@@ -268,14 +273,14 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		// checksum
 		p = strchr(data, '$');
 		if (!p || p - data != 2 * CHECKSUM_SIZE ||
-		    strspn(data, HEXCHARS) != p - data)
+		    strspn(data, HEXCHARS_all) != p - data)
 			return 0;
 		data = p + 1;
 
 		// encrypted timestamp
 		p += strlen(data) + 1;
 		if (*p || p - data != TIMESTAMP_SIZE * 2 ||
-		    strspn(data, HEXCHARS) != p - data)
+		    strspn(data, HEXCHARS_all) != p - data)
 			return 0;
 
 		return 1;
@@ -303,7 +308,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		// timestamp+checksum
 		p += strlen(data) + 1;
 		if (*p || p - data != (TIMESTAMP_SIZE + CHECKSUM_SIZE) * 2 ||
-		    strspn(data, HEXCHARS) != p - data)
+		    strspn(data, HEXCHARS_all) != p - data)
 			return 0;
 
 		return 1;
@@ -411,13 +416,13 @@ static int cmp_exact(char *source, int index)
 	return 1;
 }
 
-static int get_hash_0(int index) { return output[index][0] & 0xf; }
-static int get_hash_1(int index) { return output[index][0] & 0xff; }
-static int get_hash_2(int index) { return output[index][0] & 0xfff; }
-static int get_hash_3(int index) { return output[index][0] & 0xffff; }
-static int get_hash_4(int index) { return output[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return output[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return output[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return output[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return output[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return output[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return output[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return output[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return output[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return output[index][0] & PH_MASK_6; }
 
 static int salt_hash(void *salt)
 {
@@ -440,9 +445,7 @@ struct fmt_main fmt_mskrb5 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_OMP | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -453,9 +456,7 @@ struct fmt_main fmt_mskrb5 = {
 		split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

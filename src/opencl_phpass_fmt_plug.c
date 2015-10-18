@@ -17,12 +17,10 @@ john_register_one(&fmt_opencl_phpass);
 #include "arch.h"
 #include "formats.h"
 #include "common.h"
+#include "stdint.h"
 #include "misc.h"
 #include "options.h"
 #include "common-opencl.h"
-
-#define uint32_t                unsigned int
-#define uint8_t                 unsigned char
 
 #define FORMAT_LABEL            "phpass-opencl"
 #define FORMAT_NAME             ""
@@ -114,9 +112,6 @@ static cl_mem mem_in, mem_out, mem_setting;
 static size_t insize, outsize, settingsize;
 static struct fmt_main *self;
 
-#define MIN(a, b)               (((a) > (b)) ? (b) : (a))
-#define MAX(a, b)               (((a) > (b)) ? (a) : (b))
-
 #define STEP			0
 #define SEED			256
 
@@ -132,20 +127,6 @@ static const char * warn[] = {
 static size_t get_task_max_work_group_size()
 {
 	return autotune_get_task_max_work_group_size(FALSE, 0, crypt_kernel);
-}
-
-static size_t get_task_max_size()
-{
-	return 0;
-}
-
-static size_t get_default_workgroup()
-{
-	if (cpu(device_info[gpu_id]))
-		return get_platform_vendor_id(platform_id) == DEV_INTEL ?
-			8 : 1;
-	else
-		return 64;
 }
 
 static void create_clobj(size_t kpc, struct fmt_main *self)
@@ -183,20 +164,26 @@ static void create_clobj(size_t kpc, struct fmt_main *self)
 
 static void release_clobj(void)
 {
-	HANDLE_CLERROR(clReleaseMemObject(mem_in), "Release mem in");
-	HANDLE_CLERROR(clReleaseMemObject(mem_setting), "Release mem setting");
-	HANDLE_CLERROR(clReleaseMemObject(mem_out), "Release mem out");
+	if (outbuffer) {
+		HANDLE_CLERROR(clReleaseMemObject(mem_in), "Release mem in");
+		HANDLE_CLERROR(clReleaseMemObject(mem_setting), "Release mem setting");
+		HANDLE_CLERROR(clReleaseMemObject(mem_out), "Release mem out");
 
-	MEM_FREE(inbuffer);
-	MEM_FREE(outbuffer);
+		MEM_FREE(inbuffer);
+		MEM_FREE(outbuffer);
+	}
 }
 
 static void done(void)
 {
-	release_clobj();
+	if (autotuned) {
+		release_clobj();
 
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+		HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
+		HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+
+		autotuned--;
+	}
 }
 
 static void set_key(char *key, int index)
@@ -223,16 +210,17 @@ static char *get_key(int index)
 static void init(struct fmt_main *_self)
 {
 	self = _self;
-
-	opencl_init("$JOHN/kernels/phpass_kernel.cl", gpu_id, NULL);
-
-	crypt_kernel = clCreateKernel(program[gpu_id], "phpass", &cl_error);
-	HANDLE_CLERROR(cl_error, "Error creating kernel");
+	opencl_prepare_dev(gpu_id);
 }
 
 static void reset(struct db_main *db)
 {
-	if (!db) {
+	if (!autotuned) {
+		opencl_init("$JOHN/kernels/phpass_kernel.cl", gpu_id, NULL);
+
+		crypt_kernel = clCreateKernel(program[gpu_id], "phpass", &cl_error);
+		HANDLE_CLERROR(cl_error, "Error creating kernel");
+
 		// Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 1,
 		                       self, create_clobj, release_clobj,
@@ -338,20 +326,20 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	global_work_size = local_work_size ? (((count + 7) / 8) + local_work_size - 1) / local_work_size * local_work_size : (count + 7 / 8);
 
 #ifdef _PHPASS_DEBUG
-	printf("crypt_all(%d) gws %zu\n", count, global_work_size);
+	printf("crypt_all(%d) gws "Zu"\n", count, global_work_size);
 #endif
 	// Copy data to gpu
-	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], mem_in, CL_FALSE, 0,
+	BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], mem_in, CL_FALSE, 0,
 		insize, inbuffer, 0, NULL, multi_profilingEvent[0]),
 		"Copy data to gpu");
 
 	// Run kernel
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1,
+	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1,
 		NULL, &global_work_size, lws, 0, NULL,
 		multi_profilingEvent[1]), "Run kernel");
 
 	// Read the result back
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], mem_out, CL_TRUE, 0,
+	BENCH_CLERROR(clEnqueueReadBuffer(queue[gpu_id], mem_out, CL_TRUE, 0,
 		outsize, outbuffer, 0, NULL, multi_profilingEvent[2]),
 		"Copy result back");
 
@@ -368,7 +356,7 @@ static int binary_hash_0(void *binary)
 		printf("%08x ", b[i]);
 	puts("");
 #endif
-	return (((ARCH_WORD_32 *) binary)[0] & 0xf);
+	return (((ARCH_WORD_32 *) binary)[0] & PH_MASK_0);
 }
 
 static int get_hash_0(int index)
@@ -380,37 +368,37 @@ static int get_hash_0(int index)
 		printf("%08x ", outbuffer[index].v[i]);
 	puts("");
 #endif
-	return outbuffer[index].v[0] & 0xf;
+	return outbuffer[index].v[0] & PH_MASK_0;
 }
 
 static int get_hash_1(int index)
 {
-	return outbuffer[index].v[0] & 0xff;
+	return outbuffer[index].v[0] & PH_MASK_1;
 }
 
 static int get_hash_2(int index)
 {
-	return outbuffer[index].v[0] & 0xfff;
+	return outbuffer[index].v[0] & PH_MASK_2;
 }
 
 static int get_hash_3(int index)
 {
-	return outbuffer[index].v[0] & 0xffff;
+	return outbuffer[index].v[0] & PH_MASK_3;
 }
 
 static int get_hash_4(int index)
 {
-	return outbuffer[index].v[0] & 0xfffff;
+	return outbuffer[index].v[0] & PH_MASK_4;
 }
 
 static int get_hash_5(int index)
 {
-	return outbuffer[index].v[0] & 0xffffff;
+	return outbuffer[index].v[0] & PH_MASK_5;
 }
 
 static int get_hash_6(int index)
 {
-	return outbuffer[index].v[0] & 0x7ffffff;
+	return outbuffer[index].v[0] & PH_MASK_6;
 }
 
 static int cmp_all(void *binary, int count)
@@ -470,9 +458,7 @@ struct fmt_main fmt_opencl_phpass = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -483,9 +469,7 @@ struct fmt_main fmt_opencl_phpass = {
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			binary_hash_0,

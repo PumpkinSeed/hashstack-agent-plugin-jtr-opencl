@@ -26,7 +26,9 @@ john_register_one(&fmt_django_scrypt);
 #ifdef _OPENMP
 static int omp_t = 1;
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               1 // So slow a format, a multiplier is NOT needed
+#endif
 #endif
 #include "memdbg.h"
 
@@ -171,13 +173,13 @@ static void *get_binary(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static void set_salt(void *salt)
 {
@@ -194,11 +196,14 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	for (index = 0; index < count; index++)
 #endif
 	{
-		crypto_scrypt((unsigned char*)saved_key[index], strlen((char*)saved_key[index]),
+		if (crypto_scrypt((unsigned char*)saved_key[index], strlen((char*)saved_key[index]),
 				cur_salt->salt, strlen((char*)cur_salt->salt),
 				(1ULL) << cur_salt->N, cur_salt->r,
 				cur_salt->p, (unsigned char*)crypt_out[index],
-				BINARY_SIZE);
+				BINARY_SIZE) == -1)
+		{
+			memset(crypt_out[index], 0, sizeof(crypt_out[index]));
+		}
 	}
 	return count;
 }
@@ -209,7 +214,7 @@ static int cmp_all(void *binary, int count)
 #ifdef _OPENMP
 	for (; index < count; index++)
 #endif
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -238,7 +243,6 @@ static char *get_key(int index)
 	return saved_key[index];
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int tunable_cost_N(void *salt)
 {
 	static struct custom_salt *my_salt;
@@ -262,7 +266,6 @@ static unsigned int tunable_cost_p(void *salt)
 	my_salt = salt;
 	return (unsigned int) my_salt->p;
 }
-#endif
 
 struct fmt_main fmt_django_scrypt = {
 	{
@@ -280,13 +283,11 @@ struct fmt_main fmt_django_scrypt = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			"N",
 			"r",
 			"p"
 		},
-#endif
 		scrypt_tests
 	}, {
 		init,
@@ -297,13 +298,11 @@ struct fmt_main fmt_django_scrypt = {
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			tunable_cost_N,
 			tunable_cost_r,
 			tunable_cost_p
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

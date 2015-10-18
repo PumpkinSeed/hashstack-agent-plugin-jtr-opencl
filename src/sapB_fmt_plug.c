@@ -34,19 +34,22 @@ john_register_one(&fmt_sapB);
 #define FORMAT_NAME			"SAP CODVN B (BCODE)"
 
 #ifdef SIMD_COEF_32
-#define NBKEYS				(SIMD_COEF_32 * MD5_SSE_PARA)
-#define DO_MMX_MD5(in, out)		SSEmd5body(in, (unsigned int*)out, NULL, SSEi_MIXED_IN)
+#define NBKEYS				(SIMD_COEF_32 * SIMD_PARA_MD5)
 #endif
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 #define ALGORITHM_NAME			"MD5 " MD5_ALGORITHM_NAME
 
 #if defined(_OPENMP)
 #include <omp.h>
 static unsigned int omp_t = 1;
 #ifdef SIMD_COEF_32
+#ifndef OMP_SCALE
 #define OMP_SCALE			512	// tuned on K8-dual HT.
+#endif
 #else
+#ifndef OMP_SCALE
 #define OMP_SCALE			2048
+#endif
 #endif
 #endif
 
@@ -281,9 +284,9 @@ static int cmp_all(void *binary, int count) {
 	unsigned int x,y=0;
 
 #ifdef _OPENMP
-	for(;y<MD5_SSE_PARA*omp_t;y++)
+	for(;y<SIMD_PARA_MD5*omp_t;y++)
 #else
-	for(;y<MD5_SSE_PARA;y++)
+	for(;y<SIMD_PARA_MD5;y++)
 #endif
 		for(x = 0; x < SIMD_COEF_32; x++)
 		{
@@ -514,9 +517,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 			clean_pos[ti] = len + cur_salt->l;
 		}
 
-		DO_MMX_MD5(&saved_key[t*NBKEYS*64], &crypt_key[t*NBKEYS*16]);
+		SIMDmd5body(&saved_key[t*NBKEYS*64],
+		           (unsigned int*)&crypt_key[t*NBKEYS*16], NULL, SSEi_MIXED_IN);
 
-		for (i = 0; i < MD5_SSE_PARA; i++)
+		for (i = 0; i < SIMD_PARA_MD5; i++)
 			memset(&interm_key[t*64*NBKEYS+i*64*SIMD_COEF_32+32*SIMD_COEF_32], 0, 32*SIMD_COEF_32);
 
 		for (index = 0; index < NBKEYS; index++) {
@@ -543,7 +547,8 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 			((unsigned int *)interm_key)[14*SIMD_COEF_32 + (ti&(SIMD_COEF_32-1)) + (unsigned int)ti/SIMD_COEF_32*16*SIMD_COEF_32] = sum20 << 3;
 		}
 
-		DO_MMX_MD5(&interm_key[t*NBKEYS*64], &crypt_key[t*NBKEYS*16]);
+		SIMDmd5body(&interm_key[t*NBKEYS*64],
+		           (unsigned int*)&crypt_key[t*NBKEYS*16], NULL, SSEi_MIXED_IN);
 
 		for (index = 0; index < NBKEYS; index++) {
 			*(ARCH_WORD_32*)&crypt_key[GETOUTPOS(0, ti)] ^= *(ARCH_WORD_32*)&crypt_key[GETOUTPOS(8, ti)];
@@ -665,21 +670,21 @@ static char *split(char *ciphertext, int index, struct fmt_main *self)
 
 #ifdef SIMD_COEF_32
 #define HASH_OFFSET (index&(SIMD_COEF_32-1))+((unsigned int)index/SIMD_COEF_32)*SIMD_COEF_32*4
-static int get_hash_0(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xf; }
-static int get_hash_1(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xff; }
-static int get_hash_2(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xfff; }
-static int get_hash_3(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xffff; }
-static int get_hash_4(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xfffff; }
-static int get_hash_5(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0xffffff; }
-static int get_hash_6(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & 0x7ffffff; }
+static int get_hash_0(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_0; }
+static int get_hash_1(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_1; }
+static int get_hash_2(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_2; }
+static int get_hash_3(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_3; }
+static int get_hash_4(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_4; }
+static int get_hash_5(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_5; }
+static int get_hash_6(int index) { return ((ARCH_WORD_32 *)crypt_key)[HASH_OFFSET] & PH_MASK_6; }
 #else
-static int get_hash_0(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xF; }
-static int get_hash_1(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFF; }
-static int get_hash_2(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFF; }
-static int get_hash_3(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFF; }
-static int get_hash_4(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFFF; }
-static int get_hash_5(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFFFF; }
-static int get_hash_6(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0x7FFFFFF; }
+static int get_hash_0(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_0; }
+static int get_hash_1(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_1; }
+static int get_hash_2(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_2; }
+static int get_hash_3(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_3; }
+static int get_hash_4(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_4; }
+static int get_hash_5(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_5; }
+static int get_hash_6(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_6; }
 #endif
 
 // Public domain hash function by DJ Bernstein
@@ -710,10 +715,8 @@ struct fmt_main fmt_sapB = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		FMT_OMP | FMT_8_BIT,
-#if FMT_MAIN_VERSION > 11
+		FMT_TRUNC | FMT_OMP | FMT_8_BIT,
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -724,9 +727,7 @@ struct fmt_main fmt_sapB = {
 		split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

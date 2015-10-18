@@ -58,6 +58,11 @@
 #endif
 #endif
 
+#if (!AC_BUILT && defined(HAVE_CRYPT))
+#undef HAVE_CRYPT_H
+#define HAVE_CRYPT_H 1
+#endif
+
 #if HAVE_CRYPT_H
 #include <crypt.h>
 #endif
@@ -244,18 +249,18 @@ static void init(struct fmt_main *self)
 
 static int valid(char *ciphertext, struct fmt_main *self)
 {
-	int length, count_base64, id, pw_length;
+	int length, count_base64, count_base64_2, id, pw_length;
 	char pw[PLAINTEXT_LENGTH + 1], *new_ciphertext;
 /* We assume that these are zero-initialized */
 	static char sup_length[BINARY_SIZE], sup_id[0x80];
-	static int len_13_warned = 0;
-	int show_warn = 1;
 
-	length = count_base64 = 0;
+	length = count_base64 = count_base64_2 = 0;
 	while (ciphertext[length]) {
-		if (atoi64[ARCH_INDEX(ciphertext[length])] != 0x7F &&
-		    (ciphertext[0] == '_' || length >= 2))
+		if (atoi64[ARCH_INDEX(ciphertext[length])] != 0x7F) {
 			count_base64++;
+			if (length >= 2)
+				count_base64_2++;
+		}
 		length++;
 	}
 
@@ -263,16 +268,19 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		return 0;
 
 	id = 0;
-	if (length == 13 && count_base64 == 11)
+	if (length == 13 && count_base64 == 13) /* valid salt */
 		id = 1;
 	else
-	if (length >= 13 &&
-	    count_base64 >= length - 2 && /* allow for invalid salt */
-	    (length - 2) % 11 == 0)
+	if (length == 13 && count_base64_2 == 11) /* invalid salt */
 		id = 2;
 	else
-	if (length == 20 && count_base64 == 19 && ciphertext[0] == '_')
+	if (length >= 13 &&
+	    count_base64_2 >= length - 2 && /* allow for invalid salt */
+	    (length - 2) % 11 == 0)
 		id = 3;
+	else
+	if (length == 20 && count_base64 == 19 && ciphertext[0] == '_')
+		id = 4;
 	else
 	if (ciphertext[0] == '$') {
 		id = (unsigned char)ciphertext[1];
@@ -287,12 +295,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		return 1;
 
 /* Previously detected as unsupported */
-/*
- * NOTE, we never set length-13 hashes as invalid. Our ST hashes are of this
- * type, and if we invalidate this type, the ST will fail. So for len 13, we
- * always run the hash through the engine, to validate if it is OK or not.
- */
-	if (length > 13 && sup_length[length] < 0 && sup_id[id] < 0)
+	if (sup_length[length] < 0 && sup_id[id] < 0)
 		return 0;
 
 	pw_length = ((length - 2) / 11) << 3;
@@ -332,13 +335,8 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		return 1;
 	}
 
-	if (length == 13) {
-		if (len_13_warned)
-			show_warn = 0;
-		len_13_warned = 1;
-	}
 	if (id != 10 && !ldr_in_pot)
-	if (john_main_process && show_warn)
+	if (john_main_process)
 		fprintf(stderr, "Warning: "
 		    "hash encoding string length %d, type id %c%c\n"
 		    "appears to be unsupported on this system; "
@@ -436,21 +434,21 @@ static void *salt(char *ciphertext)
 
 #define H0(s) \
 	int i = strlen(s) - 2; \
-	return i > 0 ? H((s), i) & 0xF : 0
+	return i > 0 ? H((s), i) & PH_MASK_0 : 0
 #define H1(s) \
 	int i = strlen(s) - 2; \
-	return i > 2 ? (H((s), i) ^ (H((s), i - 2) << 4)) & 0xFF : 0
+	return i > 2 ? (H((s), i) ^ (H((s), i - 2) << 4)) & PH_MASK_1 : 0
 #define H2(s) \
 	int i = strlen(s) - 2; \
-	return i > 2 ? (H((s), i) ^ (H((s), i - 2) << 6)) & 0xFFF : 0
+	return i > 2 ? (H((s), i) ^ (H((s), i - 2) << 6)) & PH_MASK_2 : 0
 #define H3(s) \
 	int i = strlen(s) - 2; \
 	return i > 4 ? (H((s), i) ^ (H((s), i - 2) << 5) ^ \
-	    (H((s), i - 4) << 10)) & 0xFFFF : 0
+	    (H((s), i - 4) << 10)) & PH_MASK_3 : 0
 #define H4(s) \
 	int i = strlen(s) - 2; \
 	return i > 6 ? (H((s), i) ^ (H((s), i - 2) << 5) ^ \
-	    (H((s), i - 4) << 10) ^ (H((s), i - 6) << 15)) & 0xFFFFF : 0
+	    (H((s), i - 4) << 10) ^ (H((s), i - 6) << 15)) & PH_MASK_4 : 0
 
 static int binary_hash_0(void *binary)
 {
@@ -632,7 +630,7 @@ static int cmp_exact(char *source, int index)
 {
 	return 1;
 }
-#if FMT_MAIN_VERSION > 11
+
 /*
  * For generic crypt(3), the algorithm is returned as the first "tunable cost":
  * 0: unknown (shouldn't happen
@@ -713,7 +711,6 @@ static unsigned int  c3_algorithm_specific_cost1(void *salt)
 	}
 	return 1;
 }
-#endif
 
 struct fmt_main fmt_crypt = {
 	{
@@ -731,7 +728,6 @@ struct fmt_main fmt_crypt = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			/*
 			 * use algorithm as first tunable cost:
@@ -741,7 +737,6 @@ struct fmt_main fmt_crypt = {
 			"algorithm [1:descrypt 2:md5crypt 3:sunmd5 4:bcrypt 5:sha256crypt 6:sha512crypt]",
 			"algorithm specific iterations",
 		},
-#endif
 		tests
 	}, {
 		init,
@@ -752,14 +747,12 @@ struct fmt_main fmt_crypt = {
 		fmt_default_split,
 		binary,
 		salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			c3_subformat_algorithm,
 #if 1
 			c3_algorithm_specific_cost1
 #endif
 		},
-#endif
 		fmt_default_source,
 		{
 			binary_hash_0,

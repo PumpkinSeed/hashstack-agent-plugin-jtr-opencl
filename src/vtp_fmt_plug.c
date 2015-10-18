@@ -25,8 +25,14 @@ john_register_one(&fmt_vtp);
 // 512 - 30.5k
 // 1k  - 28.5k
 // 2k  - 28.5k  (times wobble)
+#ifndef OMP_SCALE
+#ifdef __MIC__
+#define OMP_SCALE 4096
+#else
 #define OMP_SCALE 256
-#endif
+#endif // __MIC__
+#endif // OMP_SCALE
+#endif // _OPENMP
 
 #include "arch.h"
 #include "md5.h"
@@ -86,7 +92,7 @@ static  struct custom_salt {
 	unsigned char salt[2048];
 	int trailer_length;
 	int version;
-	unsigned char *trailer_data[64];
+	unsigned char trailer_data[64];
 } *cur_salt;
 
 static void init(struct fmt_main *self)
@@ -98,12 +104,16 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
-		self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	saved_len = mem_calloc_tiny(sizeof(*saved_len) *
-		self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_out = mem_calloc_tiny(sizeof(*crypt_out) *
-		self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_key = mem_calloc(sizeof(*saved_key), self->params.max_keys_per_crypt);
+	saved_len = mem_calloc(sizeof(*saved_len), self->params.max_keys_per_crypt);
+	crypt_out = mem_calloc(sizeof(*crypt_out), self->params.max_keys_per_crypt);
+}
+
+static void done(void)
+{
+	MEM_FREE(crypt_out);
+	MEM_FREE(saved_len);
+	MEM_FREE(saved_key);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -119,35 +129,45 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 	if ((p = strtokm(p, "$")) == NULL) /* version */
 		goto err;
+	if(!isdec(p))
+		goto err;
 	res = atoi(p);
 	if (res != 1  && res != 2)  // VTP version 3 support is pending
-		goto err;
+		goto err; // FIXME: fprintf(stderr, ... for version 3?
 
 	if ((p = strtokm(NULL, "$")) == NULL)  /* vlans len */
+		goto err;
+	if(!isdec(p))
 		goto err;
 	res = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL)  /* vlans data */
 		goto err;
-	if (strlen(p) != res * 2)
+	if (strlen(p) / 2 != res)
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 
 	if ((p = strtokm(NULL, "$")) == NULL)  /* salt len */
 		goto err;
+	if(!isdec(p))
+		goto err;
 	res = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL)  /* salt */
 		goto err;
-	if (strlen(p) != res * 2)
+	if (strlen(p) / 2 != res)
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
+		goto err;
+
+	if (((atoi16[ARCH_INDEX(p[6])]<<4)|atoi16[ARCH_INDEX(p[7])]) >
+		sizeof(cur_salt->vsp.domain_name))
 		goto err;
 
 	if ((p = strtokm(NULL, "$")) == NULL)  /* hash */
 		goto err;
 	if (strlen(p) != BINARY_SIZE * 2)
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 
 	MEM_FREE(ptrkeep);
@@ -199,6 +219,8 @@ static void *get_salt(char *ciphertext)
 
 	// fill rest of the data
 	cs.vsp.domain_name_length = cs.salt[3];
+	if (cs.vsp.domain_name_length > sizeof(cs.vsp.domain_name))
+		cs.vsp.domain_name_length = sizeof(cs.vsp.domain_name);
 	memcpy(cs.vsp.domain_name, cs.salt + 4, cs.vsp.domain_name_length);
 	memcpy((unsigned char*)&cs.vsp.revision, cs.salt + 36, 4);
 	memcpy((unsigned char*)&cs.vsp.updater,  cs.salt + 36 + 4, 4);
@@ -226,13 +248,13 @@ static void *get_binary(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static void vtp_secret_derive(char *password, int length, unsigned char *output)
 {
@@ -401,22 +423,18 @@ struct fmt_main fmt_vtp = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid,
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

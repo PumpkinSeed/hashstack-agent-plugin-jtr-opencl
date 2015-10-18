@@ -21,13 +21,22 @@ john_register_one(&fmt_pst);
 #include "misc.h"
 #include "common.h"
 #include "formats.h"
-#include "pkzip.h"  // includes the 'inline' crc table.
+#include "crc32.h"
+
+#if !FAST_FORMATS_OMP
+#undef _OPENMP
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #ifdef __MIC__
+#ifndef OMP_SCALE
 #define OMP_SCALE               1024
+#endif
 #else
+#ifndef OMP_SCALE
 #define OMP_SCALE               16384 // core i7 no HT
+#endif
 #endif
 static int omp_t = 1;
 #endif
@@ -55,6 +64,8 @@ static struct fmt_tests tests[] = {
 	{"$pst$00000000", ""},
 	{"$pst$e3da3318", "xxx"},
 	{"$pst$a655dd18", "XYz123"},
+	{"$pst$29b14070", "thisisalongstring"},
+	{"$pst$25b44615", "string with space"},
 	{NULL}
 };
 
@@ -87,9 +98,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	if (strncmp(ciphertext, "$pst$", 5))
 		return 0;
 	p = ciphertext + 5;
-	if (strlen(p) != BINARY_SIZE * 2)
-		return 0;
-	if (!ishex(p))
+	if (hexlenl(p) != BINARY_SIZE * 2)
 		return 0;
 	return 1;
 }
@@ -125,10 +134,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 #pragma omp parallel for private(i)
 #endif
 	for (i = 0; i < count; ++i) {
-		ARCH_WORD_32 crc = 0;
+		CRC32_t crc = 0;
 		unsigned char *p = (unsigned char*)saved_key[i];
 		while (*p)
-			crc = pkzip_crc32(crc, *p++);
+			crc = jtr_crc32(crc, *p++);
 		crypt_out[i] = crc;
 	}
 	return count;
@@ -148,13 +157,13 @@ static char *get_key(int index)
 	return saved_key[index];
 }
 
-static int get_hash_0(int index) { return crypt_out[index] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index] & PH_MASK_6; }
 
 struct fmt_main fmt_pst = {
 	{
@@ -171,10 +180,11 @@ struct fmt_main fmt_pst = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		FMT_CASE | FMT_8_BIT | FMT_NOT_EXACT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
-		{ NULL },
+#ifdef _OPENMP
+		FMT_OMP | FMT_OMP_BAD |
 #endif
+		FMT_CASE | FMT_TRUNC | FMT_8_BIT | FMT_NOT_EXACT,
+		{ NULL },
 		tests
 	}, {
 		init,
@@ -185,9 +195,7 @@ struct fmt_main fmt_pst = {
 		fmt_default_split,
 		get_binary,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

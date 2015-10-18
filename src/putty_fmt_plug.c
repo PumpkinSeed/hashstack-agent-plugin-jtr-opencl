@@ -21,15 +21,15 @@ john_register_one(&fmt_putty);
 #include "common.h"
 #include "formats.h"
 #include "misc.h"
-#include <openssl/aes.h>
+#include "aes.h"
 #include "sha.h"
 #include <openssl/evp.h>
-//#include <openssl/hmac.h>
-#include "gladman_hmac.h"
-#include <openssl/aes.h>
+#include "hmac_sha.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE           64
+#endif
 #endif
 #include "memdbg.h"
 
@@ -119,50 +119,65 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	ctcopy += 7;
 	if ((p = strtokm(ctcopy, "*")) == NULL) /* cipher */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	res = atoi(p);
 	if(res != 1) /* check cipher type */
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* cipher block length*/
+		goto err;
+	if (!isdec(p))
 		goto err;
 	res = atoi(p);
 	if(res != 16) /* check cipher block length */
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* is_mac */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	res = atoi(p);
 	if(res != 0 && res != 1)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* old_fmt */
+		goto err;
+	if (!isdec(p))
 		goto err;
 	is_old_fmt = atoi(p);
 	if(is_old_fmt != 0 && is_old_fmt!= 1)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* mac */
 		goto err;
-	if (strlen(p) > 128)
+	res = strlen(p);
+	if (res > 128)
+		goto err;
+	if (hexlenl(p) != res)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* public_blob_len */
+		goto err;
+	if (!isdec(p))
 		goto err;
 	res = atoi(p);
 	if (res > 4096)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* public_blob */
 		goto err;
-	if (strlen(p) != res * 2)
+	if (hexlenl(p) != res * 2)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* private_blob_len */
+		goto err;
+	if (!isdec(p))
 		goto err;
 	res = atoi(p);
 	if (res > 4096)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* private_blob */
 		goto err;
-	if (strlen(p) != res * 2)
+	if (hexlenl(p) != res * 2)
 		goto err;
 	if (!is_old_fmt) {
 		if ((p = strtokm(NULL, "*")) == NULL)	/* alg */
 			goto err;
-		if (strlen(p) > 8)
+		if (strlen(p) > 7)
 			goto err;
 		if ((p = strtokm(NULL, "*")) == NULL)	/* encryption */
 			goto err;
@@ -402,9 +417,7 @@ struct fmt_main fmt_putty = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		putty_tests
 	},
 	{
@@ -416,9 +429,7 @@ struct fmt_main fmt_putty = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

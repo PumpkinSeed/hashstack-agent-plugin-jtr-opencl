@@ -16,19 +16,32 @@
 
 #include "opencl_misc.h"
 
-#ifdef USE_BITSELECT
-#define MD4_F(x, y, z)	bitselect((z), (y), (x))
+/* The basic MD4 functions */
+#if HAVE_LUT3
+#define MD4_F(x, y, z)  lut3(x, y, z, 0xca)
+#elif USE_BITSELECT
+#define MD4_F(x, y, z)  bitselect((z), (y), (x))
+#elif HAVE_ANDNOT
+#define MD4_F(x, y, z)  ((x & y) ^ ((~x) & z))
 #else
-#define MD4_F(x, y, z)	((z) ^ ((x) & ((y) ^ (z))))
+#define MD4_F(x, y, z)  ((z) ^ ((x) & ((y) ^ (z))))
 #endif
 
-#define MD4_H(x, y, z)	(((x) ^ (y)) ^ (z))
-#define MD4_H2(x, y, z)	((x) ^ ((y) ^ (z)))
+#if HAVE_LUT3
+#define MD4_G(x, y, z)  lut3(x, y, z, 0xe8)
+#elif USE_BITSELECT
+#define MD4_G(x, y, z)  bitselect((x), (y), (z) ^ (x))
+#else
+#define MD4_G(x, y, z)  (((x) & ((y) | (z))) | ((y) & (z)))
+#endif
 
-
-/* The basic MD4 functions */
-#define MD4_G(x, y, z)	(((x) & ((y) | (z))) | ((y) & (z)))
-
+#if HAVE_LUT3
+#define MD4_H(x, y, z)  lut3(x, y, z, 0x96)
+#define MD4_H2 MD4_H
+#else
+#define MD4_H(x, y, z)  (((x) ^ (y)) ^ (z))
+#define MD4_H2(x, y, z) ((x) ^ ((y) ^ (z)))
+#endif
 
 /* The MD4 transformation for all three rounds. */
 #define MD4STEP(f, a, b, c, d, x, s)  \

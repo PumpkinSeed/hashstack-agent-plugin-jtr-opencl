@@ -68,12 +68,14 @@ john_register_one(&fmt_mscash2);
 #include "unicode.h"
 #include "sha.h"
 #include "md4.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 #include "loader.h"
 
 #if defined (_OPENMP)
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE			8	// Tuned on Corei7 Quad-HT
+#endif
 #endif
 
 #include "memdbg.h"
@@ -122,7 +124,7 @@ static struct fmt_tests tests[] = {
 #define ALGORITHM_NAME			"PBKDF2-SHA1 " SHA1_ALGORITHM_NAME
 
 #ifdef SIMD_COEF_32
-#define MS_NUM_KEYS			(SIMD_COEF_32*SHA1_SSE_PARA)
+#define MS_NUM_KEYS			(SIMD_COEF_32*SIMD_PARA_SHA1)
 // Ok, now we have our MMX/SSE2/intr buffer.
 // this version works properly for MMX, SSE2 (.S) and SSE2 intrinsic.
 #define GETPOS(i, index)	( (index&(SIMD_COEF_32-1))*4 + ((i)&(0xffffffff-3) )*SIMD_COEF_32 + (3-((i)&3)) + (unsigned int)index/SIMD_COEF_32*SHA_BUF_SIZ*SIMD_COEF_32*4 ) //for endianity conversion
@@ -134,7 +136,7 @@ static unsigned char (*sse_crypt2);
 # define MS_NUM_KEYS			1
 #endif
 
-#define MIN_KEYS_PER_CRYPT		1
+#define MIN_KEYS_PER_CRYPT		MS_NUM_KEYS
 #define MAX_KEYS_PER_CRYPT		MS_NUM_KEYS
 
 #define U16_KEY_LEN			(2*PLAINTEXT_LENGTH)
@@ -303,6 +305,7 @@ char *mscash2_prepare(char *split_fields[10], struct fmt_main *self)
 			MEM_FREE(cp);
 			return cipher;
 		}
+		MEM_FREE(cp);
 		return split_fields[1];
 	}
 	if (!split_fields[0])
@@ -403,76 +406,76 @@ static void *get_binary(char *ciphertext)
 
 static int binary_hash_0(void *binary)
 {
-	return ((unsigned int*)binary)[3] & 0x0F;
+	return ((unsigned int*)binary)[3] & PH_MASK_0;
 }
 
 
 static int binary_hash_1(void *binary)
 {
-	return ((unsigned int*)binary)[3] & 0xFF;
+	return ((unsigned int*)binary)[3] & PH_MASK_1;
 }
 
 
 static int binary_hash_2(void *binary)
 {
-	return ((unsigned int*)binary)[3] & 0x0FFF;
+	return ((unsigned int*)binary)[3] & PH_MASK_2;
 }
 
 
 static int binary_hash_3(void *binary)
 {
-	return ((unsigned int*)binary)[3] & 0x0FFFF;
+	return ((unsigned int*)binary)[3] & PH_MASK_3;
 }
 
 
 static int binary_hash_4(void *binary)
 {
-	return ((unsigned int*)binary)[3] & 0x0FFFFF;
+	return ((unsigned int*)binary)[3] & PH_MASK_4;
 }
 
 static int binary_hash_5(void *binary)
 {
-	return ((unsigned int*)binary)[3] & 0x0FFFFFF;
+	return ((unsigned int*)binary)[3] & PH_MASK_5;
 }
 
 static int binary_hash_6(void *binary)
 {
-	return ((unsigned int*)binary)[3] & 0x07FFFFFF;
+	return ((unsigned int*)binary)[3] & PH_MASK_6;
 }
 
 static int get_hash_0(int index)
 {
-	return crypt_out[4 * index + 3] & 0x0F;
+	return crypt_out[4 * index + 3] & PH_MASK_0;
 }
 
 static int get_hash_1(int index)
 {
-	return crypt_out[4 * index + 3] & 0xFF;
+	return crypt_out[4 * index + 3] & PH_MASK_1;
 }
 
 static int get_hash_2(int index)
 {
-	return crypt_out[4 * index + 3] & 0x0FFF;
+	return crypt_out[4 * index + 3] & PH_MASK_2;
 }
 
 static int get_hash_3(int index)
 {
-	return crypt_out[4 * index + 3] & 0x0FFFF;
+	return crypt_out[4 * index + 3] & PH_MASK_3;
 }
 
 static int get_hash_4(int index)
 {
-	return crypt_out[4 * index + 3] & 0x0FFFFF;
+	return crypt_out[4 * index + 3] & PH_MASK_4;
 }
 
 static int get_hash_5(int index)
 {
-	return crypt_out[4 * index + 3] & 0x0FFFFFF;
+	return crypt_out[4 * index + 3] & PH_MASK_5;
 }
 
 static int get_hash_6(int index)
 {
-	return crypt_out[4 * index + 3] & 0x07FFFFFF;
+	return crypt_out[4 * index + 3] & PH_MASK_6;
 }
 
 static int cmp_all(void *binary, int count)
@@ -614,8 +617,8 @@ static void pbkdf2_sse2(int t)
 
 	for(i = 1; i < iteration_cnt; i++)
 	{
-		SSESHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt1, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
-		SSESHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt2, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
+		SIMDSHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt1, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
+		SIMDSHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt2, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
 		// only xor first 16 bytes, since that is ALL this format uses
 		for (k = 0; k < MS_NUM_KEYS; k++) {
 			unsigned *p = &((unsigned int*)t_sse_hash1)[k/SIMD_COEF_32*SHA_BUF_SIZ*SIMD_COEF_32 + (k&(SIMD_COEF_32-1))];
@@ -762,9 +765,7 @@ struct fmt_main fmt_mscash2 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_OMP | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -775,9 +776,7 @@ struct fmt_main fmt_mscash2 = {
 		mscash2_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			binary_hash_0,

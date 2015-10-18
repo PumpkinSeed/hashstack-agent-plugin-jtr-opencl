@@ -14,6 +14,12 @@
  *
  */
 
+#include "arch.h"
+#if !AC_BUILT
+#define HAVE_LIBZ 1 /* legacy build has -lz in LDFLAGS */
+#endif
+#if HAVE_LIBZ
+
 #if FMT_EXTERNS_H
 extern struct fmt_main fmt_pkzip;
 #elif FMT_REGISTERS_H
@@ -21,15 +27,14 @@ john_register_one(&fmt_pkzip);
 #else
 
 #include <string.h>
+#include <zlib.h>
 
 #include "common.h"
-#include "arch.h"
 #include "misc.h"
 #include "formats.h"
 #define USE_PKZIP_MAGIC 1
 #include "pkzip.h"
 
-#include <zlib.h>
 #include "pkzip_inffixed.h"  // This file is a data file, taken from zlib
 #include "loader.h"
 
@@ -55,7 +60,9 @@ john_register_one(&fmt_pkzip);
 
 #define MIN_KEYS_PER_CRYPT		1
 #define MAX_KEYS_PER_CRYPT		64
+#ifndef OMP_SCALE
 #define OMP_SCALE			64
+#endif
 
 //#define ZIP_DEBUG 1
 //#define ZIP_DEBUG 2
@@ -178,7 +185,7 @@ static const char *ValidateZipContents(FILE *in, long offset, u32 offex, int len
 /* there, so that we have a 'complete' format line, with the zip data contained.     */
 static int valid(char *ciphertext, struct fmt_main *self)
 {
-	u8 *p, *cp, *cpkeep;
+	c8 *p, *cp, *cpkeep;
 	int cnt, data_len, ret=0;
 	u32 crc;
 	FILE *in;
@@ -196,72 +203,59 @@ static int valid(char *ciphertext, struct fmt_main *self)
 			return ret;
 	}
 
-	cpkeep = (u8*)strdup(ciphertext);
+	cpkeep = strdup(ciphertext);
 	cp = cpkeep;
 
 	p = &cp[7];
 	if (type2)
 		++p;
-	p = pkz_GetFld(p, &cp);
-	if (!pkz_is_hex_str(cp)) {
+	if ((cp = strtokm(p, "*")) == NULL || !cp[0] || !ishexlc_oddOK(cp)) {
 		sFailStr = "Out of data, reading count of hashes field"; goto Bail; }
-	sscanf((c8*)cp, "%x", &cnt);
+	sscanf(cp, "%x", &cnt);
 	if (cnt < 1 || cnt > MAX_PKZ_FILES) {
 		sFailStr = "Count of hashes field out of range"; goto Bail; }
-	p = pkz_GetFld(p, &cp);
-	if (cp[0] < '0' || cp[0] > '2' || cp[1]) {
+	if ((cp = strtokm(NULL, "*")) == NULL || cp[0] < '0' || cp[0] > '2' || cp[1]) {
 		sFailStr = "Number of valid hash bytes empty or out of range"; goto Bail; }
 
 	while (cnt--) {
-		p = pkz_GetFld(p, &cp);
-		if (cp[0]<'1' || cp[0]>'3' || cp[1]) {
+		if ((cp = strtokm(NULL, "*")) == NULL || cp[0]<'1' || cp[0]>'3' || cp[1]) {
 			sFailStr = "Invalid data enumeration type"; goto Bail; }
 		type = cp[0] - '0';
-		p = pkz_GetFld(p, &cp);
-		if (!pkz_is_hex_str(cp)) {
+		if ((cp = strtokm(NULL, "*")) == NULL || !cp[0] || !ishexlc_oddOK(cp)) {
 			sFailStr = "Invalid type enumeration"; goto Bail; }
 		if (type > 1) {
-			p = pkz_GetFld(p, &cp);
-			if (!pkz_is_hex_str(cp)) {
+			if ((cp = strtokm(NULL, "*")) == NULL || !cp[0] || !ishexlc_oddOK(cp)) {
 				sFailStr = "Invalid compressed length"; goto Bail; }
-			sscanf((c8*)cp, "%x", &complen);
-			p = pkz_GetFld(p, &cp);
-			if (!pkz_is_hex_str(cp)) {
+			sscanf(cp, "%x", &complen);
+			if ((cp = strtokm(NULL, "*")) == NULL || !cp[0] || !ishexlc_oddOK(cp)) {
 				sFailStr = "Invalid data length value"; goto Bail; }
-			p = pkz_GetFld(p, &cp);
-			if (!pkz_is_hex_str(cp)) {
+			if ((cp = strtokm(NULL, "*")) == NULL || !cp[0] || !ishexlc_oddOK(cp)) {
 				sFailStr = "Invalid CRC value"; goto Bail; }
-			sscanf((c8*)cp, "%x", &crc);
-			p = pkz_GetFld(p, &cp);
-			if (!pkz_is_hex_str(cp)) {
+			sscanf(cp, "%x", &crc);
+			if ((cp = strtokm(NULL, "*")) == NULL || !cp[0] || !ishexlc_oddOK(cp)) {
 				sFailStr = "Invalid offset length"; goto Bail; }
-			sscanf((c8*)cp, "%lx", &offset);
-			p = pkz_GetFld(p, &cp);
-			if (!pkz_is_hex_str(cp)) {
+			sscanf(cp, "%lx", &offset);
+			if ((cp = strtokm(NULL, "*")) == NULL || !cp[0] || !ishexlc_oddOK(cp)) {
 				sFailStr = "Invalid offset length"; goto Bail; }
-			sscanf((c8*)cp, "%x", &offex);
+			sscanf(cp, "%x", &offex);
 		}
-		p = pkz_GetFld(p, &cp);
-		if ((cp[0] != '0' && cp[0] != '8') || cp[1]) {
+		if ((cp = strtokm(NULL, "*")) == NULL || (cp[0] != '0' && cp[0] != '8') || cp[1]) {
 			sFailStr = "Compression type enumeration"; goto Bail; }
-		p = pkz_GetFld(p, &cp);
-		if (!pkz_is_hex_str(cp)) {
+		if ((cp = strtokm(NULL, "*")) == NULL || !cp[0] || !ishexlc_oddOK(cp)) {
 			sFailStr = "Invalid data length value"; goto Bail; }
-		sscanf((c8*)cp, "%x", &data_len);
-		p = pkz_GetFld(p, &cp);
-		if (!pkz_is_hex_str(cp) || strlen((c8*)cp) != 4) {
+		sscanf(cp, "%x", &data_len);
+		if ((cp = strtokm(NULL, "*")) == NULL || !ishexlc(cp) || strlen(cp) != 4) {
 			sFailStr = "invalid checksum value"; goto Bail; }
 		if (type2) {
-			p = pkz_GetFld(p, &cp);
-			if (!pkz_is_hex_str(cp) || strlen((c8*)cp) != 4) {
+			if ((cp = strtokm(NULL, "*")) == NULL || !ishexlc(cp) || strlen(cp) != 4) {
 				sFailStr = "invalid checksum2 value"; goto Bail;}
 		}
-		p = pkz_GetFld(p, &cp);
+		if ((cp = strtokm(NULL, "*")) == NULL) goto Bail;
 		if (type > 1) {
 			if (type == 3) {
-				if ( !p || strlen((c8*)cp) != data_len) {
+				if ( strlen(cp) != data_len) {
 					sFailStr = "invalid checksum value"; goto Bail; }
-				in = fopen((c8*)cp, "rb"); /* have to open in bin mode for OS's where this matters, DOS/Win32 */
+				in = fopen(cp, "rb"); /* have to open in bin mode for OS's where this matters, DOS/Win32 */
 				if (!in) {
 					/* this error is listed, even if not in pkzip debugging mode. */
 					/* But not if we're just reading old pot lines */
@@ -279,29 +273,32 @@ static int valid(char *ciphertext, struct fmt_main *self)
 				fseek(in, offset+offex, SEEK_SET);
 				if (complen < 16*1024) {
 					/* simply load the whole blob */
-					unsigned char *tbuf = mem_alloc_tiny(complen, MEM_ALIGN_WORD);
+					void *tbuf = mem_alloc(complen);
 					if (fread(tbuf, 1, complen, in) != complen) {
+						MEM_FREE(tbuf);
 						fclose(in);
 						return 0;
 					}
 					data_len = complen;
+					MEM_FREE(tbuf);
 				}
 				fclose(in);
 			} else {
 				/* 'inline' data. */
 				if (complen != data_len) {
 					sFailStr = "length of full data does not match the salt len"; goto Bail; }
-				if (!pkz_is_hex_str(cp) || strlen((c8*)cp) != data_len<<1) {
+				if (!ishexlc(cp) || strlen(cp) != data_len<<1) {
 					sFailStr = "invalid inline data"; goto Bail; }
 			}
 		} else {
-			if (!pkz_is_hex_str(cp) || strlen((c8*)cp) != data_len<<1) {
+			if (!ishexlc(cp) || strlen(cp) != data_len<<1) {
 				sFailStr = "invalid partial data"; goto Bail; }
                 }
 	}
-	p = pkz_GetFld(p, &cp);
-	if (type2) ret = !strcmp((c8*)cp, "$/pkzip2$") && !*p;
-	else       ret = !strcmp((c8*)cp, "$/pkzip$") && !*p;
+	if ((cp = strtokm(NULL, "*")) == NULL) goto Bail;
+	if (strtokm(NULL, "") != NULL) goto Bail;
+	if (type2) ret = !strcmp(cp, "$/pkzip2$");
+	else       ret = !strcmp(cp, "$/pkzip$");
 
 Bail:;
 #ifdef ZIP_DEBUG
@@ -364,12 +361,9 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	K12 = mem_calloc_tiny(sizeof(*K12) * 3 *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	chk = mem_calloc_tiny(sizeof(*chk) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_key = mem_calloc(sizeof(*saved_key), self->params.max_keys_per_crypt);
+	K12 = mem_calloc(sizeof(*K12) * 3, self->params.max_keys_per_crypt);
+	chk = mem_calloc(sizeof(*chk), self->params.max_keys_per_crypt);
 
 	/*
 	 * Precompute the multiply mangling, within several parts of the hash. There is a pattern,
@@ -478,6 +472,13 @@ static void init(struct fmt_main *self)
 #endif
 }
 
+static void done(void)
+{
+	MEM_FREE(chk);
+	MEM_FREE(K12);
+	MEM_FREE(saved_key);
+}
+
 static void set_salt(void *_salt) {
 	salt = *((PKZ_SALT**)_salt);
 	if (salt->H[0].h && salt->H[1].h && salt->H[2].h)
@@ -502,76 +503,76 @@ static void *get_salt(char *ciphertext)
 	long ex_len[3] = {0,0,0};
 	u32 offex;
 	int i, j;
-	u8 *p, *cp, *cpalloc = (unsigned char*)mem_alloc(strlen(ciphertext)+1);
+	c8 *p, *cp, *cpalloc = (char*)mem_alloc(strlen(ciphertext)+1);
 	int type2 = 0;
 
 	/* Needs word align on REQ_ALIGN systems.  May crash otherwise (in the sscanf) */
 	salt = mem_calloc(1, sizeof(PKZ_SALT));
 
 	cp = cpalloc;
-	strcpy((c8*)cp, ciphertext);
-	if (!strncmp((c8*)cp, "$pkzip$", 7))
+	strcpy(cp, ciphertext);
+	if (!strncmp(cp, "$pkzip$", 7))
 	p = &cp[7];
 	else {
 		p = &cp[8];
 		type2 = 1;
 	}
-	p = pkz_GetFld(p, &cp);
-	sscanf((c8*)cp, "%x", &(salt->cnt));
-	p = pkz_GetFld(p, &cp);
-	sscanf((c8*)cp, "%x", &(salt->chk_bytes));
+	cp = strtokm(p, "*");
+	sscanf(cp, "%x", &(salt->cnt));
+	cp = strtokm(NULL, "*");
+	sscanf(cp, "%x", &(salt->chk_bytes));
 	for(i = 0; i < salt->cnt; ++i) {
 		int data_enum;
-		p = pkz_GetFld(p, &cp);
+		cp = strtokm(NULL, "*");
 		data_enum = *cp - '0';
-		p = pkz_GetFld(p, &cp);
+		cp = strtokm(NULL, "*");
 #if USE_PKZIP_MAGIC
 		{
 			// mingw can't handle %hhx.  Use 'normal' %x and assign back to uint_8 var
 			unsigned jnk;
-			sscanf((c8*)cp, "%x", &jnk);
+			sscanf(cp, "%x", &jnk);
 			salt->H[i].magic = (unsigned char)jnk;
 		}
 		salt->H[i].pSig = &SIGS[salt->H[i].magic];
 #endif
 
 		if (data_enum > 1) {
-			p = pkz_GetFld(p, &cp);
-			sscanf((c8*)cp, "%x", &(salt->compLen));
-			p = pkz_GetFld(p, &cp);
-			sscanf((c8*)cp, "%x", &(salt->deCompLen));
-			p = pkz_GetFld(p, &cp);
-			sscanf((c8*)cp, "%x", &(salt->crc32));
-			p = pkz_GetFld(p, &cp);
-			sscanf((c8*)cp, "%lx", &offset);
-			p = pkz_GetFld(p, &cp);
-			sscanf((c8*)cp, "%x", &offex);
+			cp = strtokm(NULL, "*");
+			sscanf(cp, "%x", &(salt->compLen));
+			cp = strtokm(NULL, "*");
+			sscanf(cp, "%x", &(salt->deCompLen));
+			cp = strtokm(NULL, "*");
+			sscanf(cp, "%x", &(salt->crc32));
+			cp = strtokm(NULL, "*");
+			sscanf(cp, "%lx", &offset);
+			cp = strtokm(NULL, "*");
+			sscanf(cp, "%x", &offex);
 		}
-		p = pkz_GetFld(p, &cp);
-		sscanf((c8*)cp, "%x", &(salt->H[i].compType));
-		p = pkz_GetFld(p, &cp);
-		sscanf((c8*)cp, "%x", &(salt->H[i].datlen));
-		p = pkz_GetFld(p, &cp);
+		cp = strtokm(NULL, "*");
+		sscanf(cp, "%x", &(salt->H[i].compType));
+		cp = strtokm(NULL, "*");
+		sscanf(cp, "%x", &(salt->H[i].datlen));
+		cp = strtokm(NULL, "*");
 
 		for (j = 0; j < 4; ++j) {
 			salt->H[i].c <<= 4;
 			salt->H[i].c |= atoi16[ARCH_INDEX(cp[j])];
 		}
 		if (type2) {
-			p = pkz_GetFld(p, &cp);
+			cp = strtokm(NULL, "*");
 			for (j = 0; j < 4; ++j) {
 				salt->H[i].c2 <<= 4;
 				salt->H[i].c2 |= atoi16[ARCH_INDEX(cp[j])];
 			}
 		} else
 			salt->H[i].c2 = salt->H[i].c; // fake out 2nd hash, by copying first hash
-		p = pkz_GetFld(p, &cp);
+		cp = strtokm(NULL, "*");
 		if (data_enum > 1) {
 			/* if 2 or 3, we have the FULL zip blob for decrypting. */
 			if (data_enum == 3) {
 				/* read from file. */
 				FILE *fp;
-				fp = fopen((c8*)cp, "rb");
+				fp = fopen(cp, "rb");
 				if (!fp) {
 					fprintf (stderr, "Error opening file for pkzip data:  %s\n", cp);
 					MEM_FREE(cpalloc);
@@ -669,7 +670,6 @@ static void *get_salt(char *ciphertext)
 	MEM_FREE(salt);
 
 	psalt->dsalt.salt_alloc_needs_free = 1;  // we used mem_calloc, so JtR CAN free our pointer when done with them.
-	// NOTE, we need some way to close the BIO and EVP crap!!
 
 	// set the JtR core linkage stuff for this dyna_salt
 	memcpy(salt_p, &psalt, sizeof(psalt));
@@ -729,9 +729,9 @@ static int get_next_decrypted_block(u8 *in, int sizeof_n, FILE *fp, u32 *inp_use
 	/* decrypt the data bytes (in place, in same buffer). Easy to do, only requires 1 temp character variable.  */
 	for (k = 0; k < new_bytes; ++k) {
 		C = PKZ_MULT(in[k],(*pkey2));
-		pkey0->u = pkzip_crc32 (pkey0->u, C);
+		pkey0->u = jtr_crc32 (pkey0->u, C);
 		pkey1->u = (pkey1->u + pkey0->c[KB1]) * 134775813 + 1;
-		pkey2->u = pkzip_crc32 (pkey2->u, pkey1->c[KB2]);
+		pkey2->u = jtr_crc32 (pkey2->u, pkey1->c[KB2]);
 		in[k] = C;
 	}
 	/* return the number of bytes we read from the file on this read */
@@ -788,9 +788,9 @@ static int cmp_exact_loadfile(int index)
 	b = salt->H[salt->full_zip_idx].h;
 	do {
 		C = PKZ_MULT(*b++,key2);
-		key0.u = pkzip_crc32 (key0.u, C);
+		key0.u = jtr_crc32 (key0.u, C);
 		key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-		key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+		key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 	}
 	while(--k);
 
@@ -806,7 +806,7 @@ static int cmp_exact_loadfile(int index)
         avail_in = get_next_decrypted_block(in, CHUNK, fp, &inp_used, &key0, &key1, &key2);
 		while (avail_in) {
 			for (k = 0; k < avail_in; ++k)
-				crc = pkzip_crc32(crc,in[k]);
+				crc = jtr_crc32(crc,in[k]);
 			avail_in = get_next_decrypted_block(in, CHUNK, fp, &inp_used, &key0, &key1, &key2);
 		}
 		fclose(fp);
@@ -852,7 +852,7 @@ static int cmp_exact_loadfile(int index)
             have = CHUNK - strm.avail_out;
 			/* now update our crc value */
 			for (k = 0; k < have; ++k)
-				crc = pkzip_crc32(crc,out[k]);
+				crc = jtr_crc32(crc,out[k]);
 			decomp_len += have;
         } while (strm.avail_out == 0);
 
@@ -897,26 +897,26 @@ static int cmp_exact(char *source, int index)
 		k=12;
 		do {
 			C = PKZ_MULT(*b++,key2);
-			key0.u = pkzip_crc32 (key0.u, C);
+			key0.u = jtr_crc32 (key0.u, C);
 			key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-			key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+			key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 		}
 		while(--k);
 		B = decrBuf;
 		k = salt->compLen-12;
 		do {
 			C = PKZ_MULT(*b++,key2);
-			key0.u = pkzip_crc32 (key0.u, C);
+			key0.u = jtr_crc32 (key0.u, C);
 			*B++ = C;
 			key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-			key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+			key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 		} while (--k);
 
 		if (salt->H[salt->full_zip_idx].compType == 0) {
 			// handle a stored blob (we do not have to decrypt it.
 			crc = 0xFFFFFFFF;
 			for (k = 0; k < salt->compLen-12; ++k)
-				crc = pkzip_crc32(crc,decrBuf[k]);
+				crc = jtr_crc32(crc,decrBuf[k]);
 			MEM_FREE(decrBuf);
 			return ~crc == salt->crc32;
 		}
@@ -944,7 +944,7 @@ static int cmp_exact(char *source, int index)
 
 		crc = 0xFFFFFFFF;
 		for (k = 0; k < strm.total_out; ++k)
-			crc = pkzip_crc32(crc,decompBuf[k]);
+			crc = jtr_crc32(crc,decompBuf[k]);
 		MEM_FREE(decompBuf);
 		MEM_FREE(decrBuf);
 		return ~crc == salt->crc32;
@@ -1358,9 +1358,9 @@ static int crypt_all(int *pcount, struct db_salt *_salt)
 			/* load the 'pwkey' one time, put it into the K12 array */
 			key0.u = 0x12345678UL; key1.u = 0x23456789UL; key2.u = 0x34567890UL;
 			do {
-				key0.u = pkzip_crc32 (key0.u, *p++);
+				key0.u = jtr_crc32 (key0.u, *p++);
 				key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-				key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+				key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 			} while (*p);
 			K12[idx*3] = key0.u, K12[idx*3+1] = key1.u, K12[idx*3+2] = key2.u;
 			goto SkipKeyLoadInit;
@@ -1382,9 +1382,9 @@ SkipKeyLoadInit:;
 			do
 			{
 				C = PKZ_MULT(*b++,key2);
-				key0.u = pkzip_crc32 (key0.u, C);
+				key0.u = jtr_crc32 (key0.u, C);
 				key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-				key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+				key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 			}
 			while(--k);
 
@@ -1402,9 +1402,9 @@ SkipKeyLoadInit:;
 #endif
 
 			// Now, update the key data (with that last byte.
-			key0.u = pkzip_crc32 (key0.u, C);
+			key0.u = jtr_crc32 (key0.u, C);
 			key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-			key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+			key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 
 			// Ok, we now have validated this checksum.  We need to 'do some' extra pkzip validation work.
 			// What we do here, is to decrypt a little data (possibly only 1 byte), and perform a single
@@ -1432,9 +1432,9 @@ SkipKeyLoadInit:;
 					SigChecked = 1;
 					curDecryBuf[0] = C;
 					for (; e < len;) {
-						key0.u = pkzip_crc32 (key0.u, curDecryBuf[e]);
+						key0.u = jtr_crc32 (key0.u, curDecryBuf[e]);
 						key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-						key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+						key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 						curDecryBuf[++e] = PKZ_MULT(*b++,key2);
 					}
 
@@ -1465,9 +1465,9 @@ SkipKeyLoadInit:;
 				// correct data is u16_1 == (u16_2^0xFFFF)
 				curDecryBuf[0] = C;
 				for (e = 0; e <= 4; ) {
-					key0.u = pkzip_crc32 (key0.u, curDecryBuf[e]);
+					key0.u = jtr_crc32 (key0.u, curDecryBuf[e]);
 					key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-					key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+					key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 					curDecryBuf[++e] = PKZ_MULT(*b++,key2);
 				}
 				v1 = curDecryBuf[1] | (((u16)curDecryBuf[2])<<8);
@@ -1482,9 +1482,9 @@ SkipKeyLoadInit:;
 						len = salt->H[cur_hash_idx].datlen-12;
 					SigChecked = 1;
 					for (; e < len;) {
-						key0.u = pkzip_crc32 (key0.u, curDecryBuf[e]);
+						key0.u = jtr_crc32 (key0.u, curDecryBuf[e]);
 						key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-						key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+						key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 						curDecryBuf[++e] = PKZ_MULT(*b++,key2);
 					}
 
@@ -1511,9 +1511,9 @@ SkipKeyLoadInit:;
 #endif
 					// we need 4 bytes, + 2, + 4 at most.
 					for (; e < 10;) {
-						key0.u = pkzip_crc32 (key0.u, curDecryBuf[e]);
+						key0.u = jtr_crc32 (key0.u, curDecryBuf[e]);
 						key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-						key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+						key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 						curDecryBuf[++e] = PKZ_MULT(*b++,key2);
 					}
 					if (!check_inflate_CODE2(curDecryBuf))
@@ -1532,9 +1532,9 @@ SkipKeyLoadInit:;
 					if (salt->H[cur_hash_idx].datlen-12 < til)
 						til = salt->H[cur_hash_idx].datlen-12;
 					for (; e < til;) {
-						key0.u = pkzip_crc32 (key0.u, curDecryBuf[e]);
+						key0.u = jtr_crc32 (key0.u, curDecryBuf[e]);
 						key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-						key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+						key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 						curDecryBuf[++e] = PKZ_MULT(*b++,key2);
 					}
 					if (!check_inflate_CODE1(curDecryBuf, til))
@@ -1551,9 +1551,9 @@ SkipKeyLoadInit:;
 				if (salt->H[cur_hash_idx].datlen-12 < til)
 					til = salt->H[cur_hash_idx].datlen-12;
 				for (; e < til;) {
-					key0.u = pkzip_crc32 (key0.u, curDecryBuf[e]);
+					key0.u = jtr_crc32 (key0.u, curDecryBuf[e]);
 					key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-					key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+					key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 					curDecryBuf[++e] = PKZ_MULT(*b++,key2);
 				}
 				strm.zalloc = Z_NULL; strm.zfree = Z_NULL; strm.opaque = Z_NULL; strm.next_in = Z_NULL;
@@ -1598,9 +1598,9 @@ SkipKeyLoadInit:;
 				u8 inflateBufTmp[1024];
 				if (salt->compLen > 240 && salt->H[cur_hash_idx].datlen >= 200) {
 					for (;e < 200;) {
-						key0.u = pkzip_crc32 (key0.u, curDecryBuf[e]);
+						key0.u = jtr_crc32 (key0.u, curDecryBuf[e]);
 						key1.u = (key1.u + key0.c[KB1]) * 134775813 + 1;
-						key2.u = pkzip_crc32 (key2.u, key1.c[KB2]);
+						key2.u = jtr_crc32 (key2.u, key1.c[KB2]);
 						curDecryBuf[++e] = PKZ_MULT(*b++,key2);
 					}
 					strm.zalloc = Z_NULL; strm.zfree = Z_NULL; strm.opaque = Z_NULL; strm.next_in = Z_NULL;
@@ -1619,7 +1619,7 @@ SkipKeyLoadInit:;
 
 					if (ret != Z_OK) {
 #if (ZIP_DEBUG==2)
-						fprintf(stderr, "fail=%d fail2=%d tot=%lld\n", ++FAILED, FAILED2, ((long long)CNT)*_count);
+						fprintf(stderr, "fail=%d fail2=%d tot="LLd"\n", ++FAILED, FAILED2, ((long long)CNT)*_count);
 #endif
 						goto Failed_Bailout;
 					}
@@ -1664,22 +1664,18 @@ struct fmt_main fmt_pkzip = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_DYNA_SALT,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid,
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash
@@ -1701,3 +1697,4 @@ struct fmt_main fmt_pkzip = {
 };
 
 #endif /* plugin stanza */
+#endif /* HAVE_LIBZ */

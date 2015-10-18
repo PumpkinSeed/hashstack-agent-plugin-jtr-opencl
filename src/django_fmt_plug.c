@@ -49,7 +49,9 @@ john_register_one(&fmt_django);
 #include "pbkdf2_hmac_sha256.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               4 // tuned on core i7
+#endif
 static int omp_t = 1;
 #endif
 #include "memdbg.h"
@@ -105,9 +107,15 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
+	saved_key = mem_calloc_align(sizeof(*saved_key),
 			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_out = mem_calloc_tiny(sizeof(*crypt_out) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	crypt_out = mem_calloc_align(sizeof(*crypt_out), self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+}
+
+static void done(void)
+{
+	MEM_FREE(crypt_out);
+	MEM_FREE(saved_key);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -121,6 +129,8 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	if ((p = strtokm(ctcopy, "*")) == NULL)	/* type */
 		goto err;
 	/* type must be 1 */
+	if (!isdec(p))
+		goto err;
 	if (atoi(p) != 1)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* algorithm */
@@ -129,11 +139,11 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* iterations */
 		goto err;
-	if (!isdec(p))
+	if (!isdec(p)) // FIXME: what about iterations == 0?
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* salt */
 		goto err;
-	if (strlen(p)  > SALT_SIZE)
+	if (strlen(p)  > sizeof(cur_salt->salt)-1)
 		goto err;
 	if ((p = strtokm(NULL, "")) == NULL)	/* hash */
 		goto err;
@@ -159,9 +169,7 @@ static void *get_salt(char *ciphertext)
 	ctcopy += 9;	/* skip over "$django$*" */
 	p = strtokm(ctcopy, "*");
 	cs.type = atoi(p);
-	p = strtokm(NULL, "*");
-	/* break up 'p' */
-	strtokm(p, "$");
+	strtokm(NULL, "$");
 	t = strtokm(NULL, "$");
 	cs.iterations = atoi(t);
 	t = strtokm(NULL, "$");
@@ -182,13 +190,13 @@ static void *get_binary(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static void set_salt(void *salt)
 {
@@ -241,7 +249,7 @@ static int cmp_all(void *binary, int count)
 {
 	int index = 0;
 	for (; index < count; index++)
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -267,7 +275,6 @@ static char *get_key(int index)
 	return saved_key[index];
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int iteration_count(void *salt)
 {
 	struct custom_salt *my_salt;
@@ -275,7 +282,6 @@ static unsigned int iteration_count(void *salt)
 	my_salt = salt;
 	return (unsigned int)my_salt->iterations;
 }
-#endif
 
 struct fmt_main fmt_django = {
 	{
@@ -293,26 +299,22 @@ struct fmt_main fmt_django = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		django_tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid,
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

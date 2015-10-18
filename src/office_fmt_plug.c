@@ -12,10 +12,12 @@ john_register_one(&fmt_office);
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
-#include <openssl/aes.h>
+#include "aes.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               4
+#endif
 #endif
 
 #include "arch.h"
@@ -29,7 +31,7 @@ john_register_one(&fmt_office);
 #include "sha2.h"
 #include "johnswap.h"
 #include "office_common.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 #include "memdbg.h"
 
 //#undef SIMD_COEF_32
@@ -47,24 +49,17 @@ john_register_one(&fmt_office);
 #define SALT_ALIGN	sizeof(int)
 #ifdef SIMD_COEF_32
 #define GETPOS_1(i, index)  ( (index&(SIMD_COEF_32-1))*4 + ((i)&(0xffffffff-3))*SIMD_COEF_32 + (3-((i)&3)) + (unsigned int)index/SIMD_COEF_32*SHA_BUF_SIZ*SIMD_COEF_32*4 )
-#define SHA1_LOOP_CNT       (SIMD_COEF_32*SHA1_SSE_PARA)
-#define MIN_KEYS_PER_CRYPT  1
-#define MAX_KEYS_PER_CRYPT	SHA1_LOOP_CNT
+#define GETPOS_512(i, index)    ( (index&(SIMD_COEF_64-1))*8 + ((i)&(0xffffffff-7))*SIMD_COEF_64 + (7-((i)&7)) + (unsigned int)index/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64*8 )
+#define SHA1_LOOP_CNT       (SIMD_COEF_32*SIMD_PARA_SHA1)
+#define SHA512_LOOP_CNT     (SIMD_COEF_64 * SIMD_PARA_SHA512)
+#define MIN_KEYS_PER_CRYPT  (SIMD_COEF_32 * SIMD_PARA_SHA1 * SIMD_PARA_SHA512)
+#define MAX_KEYS_PER_CRYPT	(SIMD_COEF_32 * SIMD_PARA_SHA1 * SIMD_PARA_SHA512)
 #else
 #define SHA1_LOOP_CNT		1
+#define SHA512_LOOP_CNT 1
 #define MIN_KEYS_PER_CRYPT	1
 #define MAX_KEYS_PER_CRYPT	1
 #endif
-
-#ifdef SIMD_COEF_64
-#define GETPOS_512(i, index)    ( (index&(SIMD_COEF_64-1))*8 + ((i)&(0xffffffff-7))*SIMD_COEF_64 + (7-((i)&7)) + (unsigned int)index/SIMD_COEF_64*SHA512_BUF_SIZ*SIMD_COEF_64*8 )
-#define SHA512_LOOP_CNT SIMD_COEF_64
-#else
-#define SHA512_LOOP_CNT 1
-#endif
-
-#undef MIN
-#define MIN(a, b)		(((a) > (b)) ? (b) : (a))
 
 static struct fmt_tests office_tests[] = {
 	{"$office$*2007*20*128*16*8b2c9e8c878844fc842012273be4bea8*aa862168b80d8c45c852696a8bb499eb*a413507fabe2d87606595f987f679ff4b5b4c2cd", "Password"},
@@ -158,17 +153,17 @@ static unsigned char *DeriveKey(unsigned char *hashValue, unsigned char *X1)
 #ifdef SIMD_COEF_32
 static void GeneratePasswordHashUsingSHA1(int idx, unsigned char final[SHA1_LOOP_CNT][20])
 {
-	unsigned char hashBuf[20], *key;
+	unsigned char hashBuf[20];
 	/* H(0) = H(salt, password)
 	 * hashBuf = SHA1Hash(salt, password);
 	 * create input buffer for SHA1 from salt and unicode version of password */
 	unsigned char X1[20];
 	SHA_CTX ctx;
-	unsigned char _IBuf[64*SHA1_LOOP_CNT+MEM_ALIGN_SIMD], *keys;
+	unsigned char _IBuf[64*SHA1_LOOP_CNT+MEM_ALIGN_CACHE], *keys;
 	uint32_t *keys32;
 	unsigned i, j;
 
-	keys = (unsigned char*)mem_align(_IBuf, MEM_ALIGN_SIMD);
+	keys = (unsigned char*)mem_align(_IBuf, MEM_ALIGN_CACHE);
 	keys32 = (uint32_t*)keys;
 	memset(keys, 0, 64*SHA1_LOOP_CNT);
 
@@ -197,7 +192,7 @@ static void GeneratePasswordHashUsingSHA1(int idx, unsigned char final[SHA1_LOOP
 			keys[GETPOS_1(1, j)] = i>>8;
 		}
 		// Here we output to 4 bytes past start of input buffer.
-		SSESHA1body(keys, &keys32[SIMD_COEF_32], NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
+		SIMDSHA1body(keys, &keys32[SIMD_COEF_32], NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
 	}
 	// last iteration is output to start of input buffer, then 32 bit 0 appended.
 	// but this is still ends up being 24 bytes of crypt data.
@@ -205,23 +200,18 @@ static void GeneratePasswordHashUsingSHA1(int idx, unsigned char final[SHA1_LOOP
 		keys[GETPOS_1(0, j)] = i&0xff;
 		keys[GETPOS_1(1, j)] = i>>8;
 	}
-	SSESHA1body(keys, keys32, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
+	SIMDSHA1body(keys, keys32, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
 
 	// Finally, append "block" (0) to H(n)
 	// hashBuf = SHA1Hash(hashBuf, 0);
-	for (i = 0; i < SHA1_SSE_PARA; ++i)
+	for (i = 0; i < SIMD_PARA_SHA1; ++i)
 		memset(&keys[GETPOS_1(23,i*SIMD_COEF_32)], 0, 4*SIMD_COEF_32);
-	SSESHA1body(keys, keys32, NULL, SSEi_MIXED_IN);
+
+	SIMDSHA1body(keys, keys32, NULL, SSEi_MIXED_IN|SSEi_FLAT_OUT);
 
 	// Now convert back into a 'flat' value, which is a flat array.
-	for (i = 0; i < SHA1_LOOP_CNT; ++i) {
-		uint32_t *Optr32 = (uint32_t*)hashBuf;
-		uint32_t *Iptr32 = &keys32[(i/SIMD_COEF_32)*SIMD_COEF_32*5 + (i%SIMD_COEF_32)];
-		for (j = 0; j < 5; ++j)
-			Optr32[j] = JOHNSWAP(Iptr32[j*SIMD_COEF_32]);
-		key = DeriveKey(hashBuf, X1);
-		memcpy(final[i], key, cur_salt->keySize/8);
-	}
+	for (i = 0; i < SHA1_LOOP_CNT; ++i)
+		memcpy(final[i], DeriveKey(&keys[20*i], X1), cur_salt->keySize/8);
 }
 #else
 // for non MMX, SHA1_LOOP_CNT is 1
@@ -283,11 +273,12 @@ static void GenerateAgileEncryptionKey(int idx, unsigned char hashBuf[SHA1_LOOP_
 	int hashSize = cur_salt->keySize >> 3;
 	unsigned i, j;
 	SHA_CTX ctx;
-	unsigned char _IBuf[64*SHA1_LOOP_CNT+MEM_ALIGN_SIMD], *keys, _OBuf[20*SHA1_LOOP_CNT+MEM_ALIGN_SIMD];
-	uint32_t *keys32, *crypt;
+	unsigned char _IBuf[64*SHA1_LOOP_CNT+MEM_ALIGN_CACHE], *keys,
+	              _OBuf[20*SHA1_LOOP_CNT+MEM_ALIGN_CACHE];
+	uint32_t *keys32, (*crypt)[20/4];
 
-	crypt = (uint32_t*)mem_align(_OBuf, MEM_ALIGN_SIMD);
-	keys = (unsigned char*)mem_align(_IBuf, MEM_ALIGN_SIMD);
+	crypt = (void*)mem_align(_OBuf, MEM_ALIGN_CACHE);
+	keys = (unsigned char*)mem_align(_IBuf, MEM_ALIGN_CACHE);
 	keys32 = (uint32_t*)keys;
 	memset(keys, 0, 64*SHA1_LOOP_CNT);
 
@@ -311,7 +302,7 @@ static void GenerateAgileEncryptionKey(int idx, unsigned char hashBuf[SHA1_LOOP_
 			keys[GETPOS_1(2, j)] = i>>16;
 		}
 		// Here we output to 4 bytes past start of input buffer.
-		SSESHA1body(keys, &keys32[SIMD_COEF_32], NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
+		SIMDSHA1body(keys, &keys32[SIMD_COEF_32], NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
 	}
 	// last iteration is output to start of input buffer, then 32 bit 0 appended.
 	// but this is still ends up being 24 bytes of crypt data.
@@ -320,7 +311,7 @@ static void GenerateAgileEncryptionKey(int idx, unsigned char hashBuf[SHA1_LOOP_
 		keys[GETPOS_1(1, j)] = (i>>8)&0xff;
 		keys[GETPOS_1(2, j)] = i>>16;
 	}
-	SSESHA1body(keys, keys32, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
+	SIMDSHA1body(keys, keys32, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
 
 	// Finally, append "block" (0) to H(n)
 	for (i = 0; i < SHA1_LOOP_CNT; ++i) {
@@ -330,26 +321,18 @@ static void GenerateAgileEncryptionKey(int idx, unsigned char hashBuf[SHA1_LOOP_
 		// 28 bytes of crypt data (192 bits).
 		keys[GETPOS_1(63, i)] = 224;
 	}
-	SSESHA1body(keys, crypt, NULL, SSEi_MIXED_IN);
-	for (i = 0; i < SHA1_LOOP_CNT; ++i) {
-		uint32_t *Optr32 = (uint32_t*)(hashBuf[i]);
-		uint32_t *Iptr32 = &crypt[(i/SIMD_COEF_32)*SIMD_COEF_32*5 + (i%SIMD_COEF_32)];
-		for (j = 0; j < 5; ++j)
-			Optr32[j] = JOHNSWAP(Iptr32[j*SIMD_COEF_32]);
-	}
+	SIMDSHA1body(keys, (ARCH_WORD_32*)crypt, NULL, SSEi_MIXED_IN|SSEi_FLAT_OUT);
+	for (i = 0; i < SHA1_LOOP_CNT; ++i)
+		memcpy(hashBuf[i], crypt[i], 20);
 
 	// And second "block" (0) to H(n)
 	for (i = 0; i < SHA1_LOOP_CNT; ++i) {
 		for (j = 0; j < 8; ++j)
 			keys[GETPOS_1(20+j, i)] = encryptedVerifierHashValueBlockKey[j];
 	}
-	SSESHA1body(keys, crypt, NULL, SSEi_MIXED_IN);
-	for (i = 0; i < SHA1_LOOP_CNT; ++i) {
-		uint32_t *Optr32 = (uint32_t*)(&(hashBuf[i][32]));
-		uint32_t *Iptr32 = &crypt[(i/SIMD_COEF_32)*SIMD_COEF_32*5 + (i%SIMD_COEF_32)];
-		for (j = 0; j < 5; ++j)
-			Optr32[j] = JOHNSWAP(Iptr32[j*SIMD_COEF_32]);
-	}
+	SIMDSHA1body(keys, (ARCH_WORD_32*)crypt, NULL, SSEi_MIXED_IN|SSEi_FLAT_OUT);
+	for (i = 0; i < SHA1_LOOP_CNT; ++i)
+		memcpy(&hashBuf[i][32], crypt[i], 20);
 
 	// Fix up the size per the spec
 	if (20 < hashSize) { // FIXME: Is this ever true?
@@ -425,19 +408,16 @@ static void GenerateAgileEncryptionKey512(int idx, unsigned char hashBuf[SHA512_
 	unsigned char tmpBuf[64];
 	unsigned int i, j, k;
 	SHA512_CTX ctx;
-	unsigned char _IBuf[128*SHA512_LOOP_CNT+MEM_ALIGN_SIMD], *keys, _OBuf[64*SHA512_LOOP_CNT+MEM_ALIGN_SIMD];
-	ARCH_WORD_64 *keys64, *crypt;
-#if SIMD_COEF_64 <= 2
+	unsigned char _IBuf[128*SHA512_LOOP_CNT+MEM_ALIGN_CACHE], *keys,
+	              _OBuf[64*SHA512_LOOP_CNT+MEM_ALIGN_CACHE];
+	ARCH_WORD_64 *keys64, (*crypt)[64/8];
 	uint32_t *keys32, *crypt32;
-#endif
 
-	crypt = (ARCH_WORD_64*)mem_align(_OBuf, MEM_ALIGN_SIMD);
-	keys = (unsigned char*)mem_align(_IBuf, MEM_ALIGN_SIMD);
+	crypt = (void*)mem_align(_OBuf, MEM_ALIGN_CACHE);
+	keys = (unsigned char*)mem_align(_IBuf, MEM_ALIGN_CACHE);
 	keys64 = (ARCH_WORD_64*)keys;
-#if SIMD_COEF_64 <= 2
 	keys32 = (uint32_t*)keys;
 	crypt32 = (uint32_t*)crypt;
-#endif
 
 	memset(keys, 0, 128*SHA512_LOOP_CNT);
 	for (i = 0; i < SHA512_LOOP_CNT; ++i) {
@@ -452,35 +432,28 @@ static void GenerateAgileEncryptionKey512(int idx, unsigned char hashBuf[SHA512_
 		keys[GETPOS_512(127, i)] = 0x20;
 		keys[GETPOS_512(126, i)] = 0x02;
 	}
-	// Create a byte array of the integer and put at the front of the input buffer
-	// 1.3.6 says that little-endian byte ordering is expected
+
 	// we do 1 less than actual number of iterations here.
 	for (i = 0; i < cur_salt->spinCount-1; i++) {
-		for (j = 0; j < SHA512_LOOP_CNT; ++j) {
-			keys[GETPOS_512(0, j)] = i&0xff;
-			keys[GETPOS_512(1, j)] = (i>>8)&0xff;
-			keys[GETPOS_512(2, j)] = i>>16;
-		}
-		// Here we output to 4 bytes past start of input buffer.
-		SSESHA512body(keys, crypt, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
-		for (k = 0; k < SHA512_LOOP_CNT; ++k) {
-#if SIMD_COEF_64 > 2
-/* Works but slow. I have no idea what is wrong with the other version */
-			for (j = 0; j < 64; ++j)
-				keys[GETPOS_512(j + 4, k)] =
-					((unsigned char*)crypt)[GETPOS_512(j, k)];
-#else
-			uint32_t *o = keys32;
-			uint32_t *i = crypt32;
-			o += (k*SIMD_COEF_64);
-			i += (k*SIMD_COEF_64);
-			for (j = 0; j < 8; ++j) {
-				*o = i[1];
-				o += SIMD_COEF_64*2+1;
-				*o-- = i[0];
-				i += SIMD_COEF_64*2;
+		unsigned int i_be = JOHNSWAP(i);
+
+		// Iteration counter in first 4 bytes
+		for (j = 0; j < SHA512_LOOP_CNT; j++)
+			keys32[(j&(SIMD_COEF_64-1))*2 + j/SIMD_COEF_64*2*SHA_BUF_SIZ*SIMD_COEF_64 + 1] = i_be;
+
+		SIMDSHA512body(keys, (ARCH_WORD_64*)crypt, NULL, SSEi_MIXED_IN);
+
+		// Then we output to 4 bytes past start of input buffer.
+		for (j = 0; j < SHA512_LOOP_CNT; j++) {
+			uint32_t *o = keys32 + (j&(SIMD_COEF_64-1))*2 + j/SIMD_COEF_64*2*SHA_BUF_SIZ*SIMD_COEF_64;
+			uint32_t *in = crypt32 + (j&(SIMD_COEF_64-1))*2 + j/SIMD_COEF_64*2*8*SIMD_COEF_64;
+
+			for (k = 0; k < 8; k++) {
+				o[0] = in[1];
+				o += SIMD_COEF_64*2;
+				o[1] = in[0];
+				in += SIMD_COEF_64*2;
 			}
-#endif
 		}
 	}
 	// last iteration is output to start of input buffer, then 32 bit 0 appended.
@@ -490,7 +463,7 @@ static void GenerateAgileEncryptionKey512(int idx, unsigned char hashBuf[SHA512_
 		keys[GETPOS_512(1, j)] = (i>>8)&0xff;
 		keys[GETPOS_512(2, j)] = i>>16;
 	}
-	SSESHA512body(keys, keys64, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
+	SIMDSHA512body(keys, keys64, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
 
 	// Finally, append "block" (0) to H(n)
 	for (i = 0; i < SHA512_LOOP_CNT; ++i) {
@@ -500,25 +473,19 @@ static void GenerateAgileEncryptionKey512(int idx, unsigned char hashBuf[SHA512_
 		// 72 bytes of crypt data (0x240  we already have 0x220 here)
 		keys[GETPOS_512(127, i)] = 0x40;
 	}
-	SSESHA512body(keys, crypt, NULL, SSEi_MIXED_IN);
-	for (i = 0; i < SHA512_LOOP_CNT; ++i) {
-		ARCH_WORD_64 *Optr64 = (ARCH_WORD_64*)(hashBuf[i]);
-		ARCH_WORD_64 *Iptr64 = &crypt[(i/SIMD_COEF_64)*SIMD_COEF_64*8 + (i%SIMD_COEF_64)];
-		for (j = 0; j < 8; ++j)
-			Optr64[j] = JOHNSWAP64(Iptr64[j*SIMD_COEF_64]);
-	}
+	SIMDSHA512body(keys, (ARCH_WORD_64*)crypt, NULL, SSEi_MIXED_IN|SSEi_FLAT_OUT);
+	for (i = 0; i < SHA512_LOOP_CNT; ++i)
+		memcpy((ARCH_WORD_64*)(hashBuf[i]), crypt[i], 64);
+
 	// And second "block" (0) to H(n)
 	for (i = 0; i < SHA512_LOOP_CNT; ++i) {
 		for (j = 0; j < 8; ++j)
 			keys[GETPOS_512(64+j, i)] = encryptedVerifierHashValueBlockKey[j];
 	}
-	SSESHA512body(keys, crypt, NULL, SSEi_MIXED_IN);
-	for (i = 0; i < SHA512_LOOP_CNT; ++i) {
-		ARCH_WORD_64 *Optr64 = (ARCH_WORD_64*)(&(hashBuf[i][64]));
-		ARCH_WORD_64 *Iptr64 = &crypt[(i/SIMD_COEF_64)*SIMD_COEF_64*8 + (i%SIMD_COEF_64)];
-		for (j = 0; j < 8; ++j)
-			Optr64[j] = JOHNSWAP64(Iptr64[j*SIMD_COEF_64]);
-	}
+	SIMDSHA512body(keys, (ARCH_WORD_64*)crypt, NULL, SSEi_MIXED_IN|SSEi_FLAT_OUT);
+
+	for (i = 0; i < SHA512_LOOP_CNT; ++i)
+		memcpy((ARCH_WORD_64*)(&hashBuf[i][64]), crypt[i], 64);
 }
 #else
 static void GenerateAgileEncryptionKey512(int idx, unsigned char hashBuf[SHA512_LOOP_CNT][128])
@@ -570,16 +537,20 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
-	                            self->params.max_keys_per_crypt, sizeof(UTF16));
-	saved_len = mem_calloc_tiny(sizeof(*saved_len) *
-	                            self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_key = mem_calloc_tiny(sizeof(*crypt_key) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	cracked = mem_calloc_tiny(sizeof(*cracked) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_key = mem_calloc(sizeof(*saved_key), self->params.max_keys_per_crypt);
+	saved_len = mem_calloc(sizeof(*saved_len), self->params.max_keys_per_crypt);
+	crypt_key = mem_calloc(sizeof(*crypt_key), self->params.max_keys_per_crypt);
+	cracked = mem_calloc(sizeof(*cracked), self->params.max_keys_per_crypt);
 	if (pers_opts.target_enc == UTF_8)
 		self->params.plaintext_length = MIN(125, PLAINTEXT_LENGTH * 3);
+}
+
+static void done(void)
+{
+	MEM_FREE(cracked);
+	MEM_FREE(crypt_key);
+	MEM_FREE(saved_len);
+	MEM_FREE(saved_key);
 }
 
 static void set_salt(void *salt)
@@ -668,13 +639,13 @@ static int cmp_exact(char *source, int index)
 	return 1;
 }
 
-static int get_hash_0(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & 0xf; }
-static int get_hash_1(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & 0xff; }
-static int get_hash_2(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & 0xfff; }
-static int get_hash_3(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & 0xffff; }
-static int get_hash_4(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & 0xfffff; }
-static int get_hash_5(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & 0xffffff; }
-static int get_hash_6(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { if (cur_salt->version!=2007) return 0; return crypt_key[index][0] & PH_MASK_6; }
 
 static void office_set_key(char *key, int index)
 {
@@ -689,7 +660,6 @@ static char *get_key(int index)
 {
 	return (char*)utf16_to_enc(saved_key[index]);
 }
-#if FMT_MAIN_VERSION > 11
 /*
  * MS Office version (2007, 2010, 2013) as first tunable cost
  */
@@ -700,7 +670,6 @@ static unsigned int ms_office_version(void *salt)
 	my_salt = salt;
 	return (unsigned int) my_salt->version;
 }
-#endif
 
 struct fmt_main fmt_office = {
 	{
@@ -718,28 +687,24 @@ struct fmt_main fmt_office = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{
 			"MS Office version",
 			"iteration count",
 		},
-#endif
 		office_tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		ms_office_common_valid_all,
 		fmt_default_split,
 		ms_office_common_binary,
 		ms_office_common_get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			ms_office_version,
 			ms_office_common_iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

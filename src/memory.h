@@ -31,14 +31,22 @@
  * the architectures/CPUs we support, yet our use of them does not require that
  * they be entirely correct.
  */
+#ifdef _MSC_VER
+#define MEM_ALIGN_CACHE			64
+#else
 #define MEM_ALIGN_CACHE			(ARCH_SIZE * 8)
+#endif
 #define MEM_ALIGN_PAGE			0x1000
 
 /*
  * SIMD buffers need to be aligned to register size
  */
 #if SIMD_COEF_32
+#ifdef _MSC_VER
+#define MEM_ALIGN_SIMD			16
+#else
 #define MEM_ALIGN_SIMD			(SIMD_COEF_32 * 4)
+#endif
 #else
 #define MEM_ALIGN_SIMD			(16)
 #endif
@@ -208,7 +216,7 @@ void dump_stuff_be_msg(const void *msg, void *x, unsigned int size);
 void dump_stuff_be_noeol(void *x, unsigned int size);
 void dump_stuff_be_msg_sepline(const void *msg, void *x, unsigned int size);
 
-#if defined (SIMD_COEF_32) || defined(NT_X86_64) || defined (MD5_SSE_PARA) || defined (MD4_SSE_PARA) || defined (SHA1_SSE_PARA)
+#if defined (SIMD_COEF_32) || defined(NT_X86_64) || defined (SIMD_PARA_MD5) || defined (SIMD_PARA_MD4) || defined (SIMD_PARA_SHA1)
 void dump_stuff_mmx(void *x, unsigned int size, unsigned int index);
 void dump_stuff_mmx_noeol(void *x, unsigned int size, unsigned int index);
 void dump_stuff_mmx_msg(const void *msg, void *buf, unsigned int size, unsigned int index);
@@ -230,7 +238,7 @@ void dump_out_shammx64(void *x, unsigned int size, unsigned int index);
 void dump_out_shammx64_msg(const void *msg, void *buf, unsigned int size, unsigned int index);
 #endif
 
-#if defined (MD5_SSE_PARA)
+#if defined (SIMD_PARA_MD5)
 // these functions help debug arrays of contigious MD5 prepared PARA buffers. Seen in sunmd5 at the current time.
 void dump_stuff_mpara_mmx(void *x, unsigned int size, unsigned int index);
 void dump_stuff_mpara_mmx_noeol(void *x, unsigned int size, unsigned int index);
@@ -245,8 +253,10 @@ void getbuf_stuff_mpara_mmx(unsigned char *oBuf, void *buf, unsigned int size, u
  * properly aligned to 'align' bytes. So:   char tmpbuf[256+15], *aligned_buf=mem_align(tmpbuf,16);
  * will give you a stack buffer, aligned to 16 bytes.  There are bugs in some compilers which cause
  * JTR_ALIGN(x) to fail properly (such as a bug in bitcoin OMP mode for linux32)
+ * Switched to a define macro for performance.
  */
-extern void *mem_align(void *stack_ptr, int align);
+#define mem_align(a,b) (void*)(((char*)(a))+(((b)-1)-(((size_t)((char*)(a))-1)&((b)-1))))
+
 
 /*
  * 32-bit endian-swap a memory buffer in place. Size is in octets (so should

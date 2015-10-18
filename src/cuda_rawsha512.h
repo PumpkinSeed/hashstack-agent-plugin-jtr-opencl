@@ -7,13 +7,7 @@
 #ifndef _CUDA_SHA512_H
 #define _CUDA_SHA512_H
 
-#ifdef __APPLE__
 #include "stdint.h"
-#else
-#define uint8_t  unsigned char
-#define uint32_t unsigned int
-#define uint64_t unsigned long long int
-#endif
 
 #define BLOCKS 4096
 #define THREADS 128
@@ -45,8 +39,8 @@ extern uint8_t sha512_key_changed;
 
 #define rol(x,n) ((x << n) | (x >> (64-n)))
 #define ror(x,n) ((x >> n) | (x << (64-n)))
-#define Ch(x,y,z) ((x & y) ^ ( (~x) & z))
-#define Maj(x,y,z) ((x & y) ^ (x & z) ^ (y & z))
+#define Ch(x, y, z) (z ^ (x & (y ^ z)))
+#define Maj(x, y, z) ((x & y) | (z & (x | y)))
 #define Sigma0(x) ((ror(x,28))  ^ (ror(x,34)) ^ (ror(x,39)))
 #define Sigma1(x) ((ror(x,14))  ^ (ror(x,18)) ^ (ror(x,41)))
 #define sigma0(x) ((ror(x,1))  ^ (ror(x,8)) ^(x>>7))

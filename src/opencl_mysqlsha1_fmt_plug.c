@@ -57,9 +57,6 @@ static const char * warn[] = {
 	"xfer: ",  "xfer: ",  ", crypt: ",  ", xfer: "
 };
 
-#define MIN(a, b)		(((a) > (b)) ? (b) : (a))
-#define MAX(a, b)		(((a) > (b)) ? (a) : (b))
-
 typedef struct {
 	unsigned int h0,h1,h2,h3,h4;
 } SHA_DEV_CTX;
@@ -96,20 +93,6 @@ static size_t get_task_max_work_group_size()
 	return autotune_get_task_max_work_group_size(FALSE, 0, crypt_kernel);
 }
 
-static size_t get_task_max_size()
-{
-	return 0;
-}
-
-static size_t get_default_workgroup()
-{
-	if (cpu(device_info[gpu_id]))
-		return get_platform_vendor_id(platform_id) == DEV_INTEL ?
-			8 : 1;
-	else
-		return 64;
-}
-
 static void create_clobj(size_t gws, struct fmt_main *self)
 {
 	pinned_key = clCreateBuffer(context[gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, PLAINTEXT_LENGTH * gws, NULL, &ret_code);
@@ -139,25 +122,33 @@ static void create_clobj(size_t gws, struct fmt_main *self)
 }
 
 static void release_clobj(void){
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_result, output, 0, NULL, NULL), "Error Unmapping output");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_key, saved_key, 0, NULL, NULL), "Error Unmapping saved_key");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_idx, saved_idx, 0, NULL, NULL), "Error Unmapping saved_idx");
-	HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error releasing memory mappings");
+	if (cl_saved_idx) {
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_result, output, 0, NULL, NULL), "Error Unmapping output");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_key, saved_key, 0, NULL, NULL), "Error Unmapping saved_key");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_idx, saved_idx, 0, NULL, NULL), "Error Unmapping saved_idx");
+		HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error releasing memory mappings");
 
-	HANDLE_CLERROR(clReleaseMemObject(pinned_result), "Release pinned result buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_key), "Release pinned key buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_idx), "Release pinned index buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_result), "Release result buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saved_key), "Release key buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saved_idx), "Release index buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_result), "Release pinned result buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_key), "Release pinned key buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_idx), "Release pinned index buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_result), "Release result buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saved_key), "Release key buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saved_idx), "Release index buffer");
+
+		cl_saved_idx = NULL;
+	}
 }
 
 static void done(void)
 {
-	release_clobj();
+	if (autotuned) {
+		release_clobj();
 
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+		HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
+		HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+
+		autotuned--;
+	}
 }
 
 static int valid(char *ciphertext, struct fmt_main *self){
@@ -188,23 +179,23 @@ static char *split(char *ciphertext, int index, struct fmt_main *self)
 
 static void init(struct fmt_main *_self)
 {
-	char build_opts[64];
-
 	self = _self;
-
-	snprintf(build_opts, sizeof(build_opts),
-	        "-DPLAINTEXT_LENGTH=%u", PLAINTEXT_LENGTH);
-	opencl_init("$JOHN/kernels/msha_kernel.cl", gpu_id, build_opts);
-
-	// create kernel to execute
-	crypt_kernel = clCreateKernel(program[gpu_id], "mysqlsha1_crypt_kernel", &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+	opencl_prepare_dev(gpu_id);
 }
 
 static void reset(struct db_main *db)
 {
-	if (!db) {
+	if (!autotuned) {
 		size_t gws_limit;
+		char build_opts[64];
+
+		snprintf(build_opts, sizeof(build_opts),
+		         "-DPLAINTEXT_LENGTH=%u", PLAINTEXT_LENGTH);
+		opencl_init("$JOHN/kernels/msha_kernel.cl", gpu_id, build_opts);
+
+		// create kernel to execute
+		crypt_kernel = clCreateKernel(program[gpu_id], "mysqlsha1_crypt_kernel", &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
 		// Current key_idx can only hold 26 bits of offset so
 		// we can't reliably use a GWS higher than 4M or so.
@@ -314,33 +305,33 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	const int count = *pcount;
 	size_t *lws = local_work_size ? &local_work_size : NULL;
 
-	global_work_size = local_work_size ? (count + local_work_size - 1) / local_work_size * local_work_size : count;
+	global_work_size = GET_MULTIPLE_OR_BIGGER(count, local_work_size);
 
 	/* Self-test cludge */
 	if (idx_offset > 4 * (global_work_size + 1))
 		idx_offset = 0;
 
 	if (key_idx > key_offset)
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, key_offset, key_idx - key_offset, saved_key + key_offset, 0, NULL, multi_profilingEvent[0]), "Failed transferring keys");
+		BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, key_offset, key_idx - key_offset, saved_key + key_offset, 0, NULL, multi_profilingEvent[0]), "Failed transferring keys");
 
-	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_idx, CL_FALSE, idx_offset, sizeof(cl_uint) * (global_work_size + 1) - idx_offset, saved_idx + (idx_offset / sizeof(cl_uint)), 0, NULL, multi_profilingEvent[1]), "Failed transferring index");
+	BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_idx, CL_FALSE, idx_offset, sizeof(cl_uint) * (global_work_size + 1) - idx_offset, saved_idx + (idx_offset / sizeof(cl_uint)), 0, NULL, multi_profilingEvent[1]), "Failed transferring index");
 
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &global_work_size, lws, 0, NULL, multi_profilingEvent[2]), "failed in clEnqueueNDRangeKernel");
+	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &global_work_size, lws, 0, NULL, multi_profilingEvent[2]), "failed in clEnqueueNDRangeKernel");
 
 	// read back partial hashes
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_result, CL_TRUE, 0, sizeof(cl_uint) * global_work_size, output, 0, NULL, multi_profilingEvent[3]), "failed in reading data back");
+	BENCH_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_result, CL_TRUE, 0, sizeof(cl_uint) * global_work_size, output, 0, NULL, multi_profilingEvent[3]), "failed in reading data back");
 	partial_output = 1;
 
 	return count;
 }
 
-static int get_hash_0(int index) { return output[index] & 0xf; }
-static int get_hash_1(int index) { return output[index] & 0xff; }
-static int get_hash_2(int index) { return output[index] & 0xfff; }
-static int get_hash_3(int index) { return output[index] & 0xffff; }
-static int get_hash_4(int index) { return output[index] & 0xfffff; }
-static int get_hash_5(int index) { return output[index] & 0xffffff; }
-static int get_hash_6(int index) { return output[index] & 0x7ffffff; }
+static int get_hash_0(int index) { return output[index] & PH_MASK_0; }
+static int get_hash_1(int index) { return output[index] & PH_MASK_1; }
+static int get_hash_2(int index) { return output[index] & PH_MASK_2; }
+static int get_hash_3(int index) { return output[index] & PH_MASK_3; }
+static int get_hash_4(int index) { return output[index] & PH_MASK_4; }
+static int get_hash_5(int index) { return output[index] & PH_MASK_5; }
+static int get_hash_6(int index) { return output[index] & PH_MASK_6; }
 
 struct fmt_main fmt_opencl_mysqlsha1 = {
 	{
@@ -358,9 +349,7 @@ struct fmt_main fmt_opencl_mysqlsha1 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -371,9 +360,7 @@ struct fmt_main fmt_opencl_mysqlsha1 = {
 		split,
 		get_binary,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

@@ -80,7 +80,9 @@ john_register_one(&fmt_clipperz);
 #include "johnswap.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               64
+#endif
 #endif
 #include "memdbg.h"
 
@@ -152,10 +154,10 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
+	saved_key = mem_calloc_align(sizeof(*saved_key),
 			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_out = mem_calloc_tiny(sizeof(*crypt_out) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	pSRP_CTX = mem_calloc_tiny(sizeof(*pSRP_CTX) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	crypt_out = mem_calloc_align(sizeof(*crypt_out), self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	pSRP_CTX = mem_calloc_align(sizeof(*pSRP_CTX), self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
 
 #ifdef HAVE_LIBGMP
 	max_keys_per_crypt =  self->params.max_keys_per_crypt;
@@ -166,7 +168,7 @@ static void init(struct fmt_main *self)
 		mpz_init_set_str(pSRP_CTX[i].z_base, "2", 10);
 		mpz_init_set_str(pSRP_CTX[i].z_exp, "1", 10);
 		mpz_init(pSRP_CTX[i].z_rop);
-		// Now, properly initialzed mpz_exp, so it is 'large enough' to hold any SHA256 value
+		// Now, properly initialized mpz_exp, so it is 'large enough' to hold any SHA256 value
 		// we need to put into it. Then we simply need to copy in the data, and possibly set
 		// the limb count size.
 		mpz_mul_2exp(pSRP_CTX[i].z_exp, pSRP_CTX[i].z_exp, 159);
@@ -193,6 +195,9 @@ void done(void)
 		mpz_clear(pSRP_CTX[i].z_rop);
 	}
 #endif
+	MEM_FREE(pSRP_CTX);
+	MEM_FREE(crypt_out);
+	MEM_FREE(saved_key);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -209,15 +214,15 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		goto err;
 	if (strlen(p) > CIPHERTEXT_LENGTH)
 		goto err;
-	if (!ishex(p))
+	if (!ishex_oddOK(p))
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)
 		goto err;
-	if (strlen(p) > SZ)
+	if (strlen(p) > SZ-1)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)
 		goto err;
-	if (strlen(p) > SZ)
+	if (strlen(p) > SZ-1)
 		goto err;
 	if ((p = strtokm(NULL, "*")))
 		goto err;
@@ -304,13 +309,13 @@ static void *get_salt(char *ciphertext)
 	return (void *)&cs;
 }
 
-static int get_hash_0(int index)       { return crypt_out[index][0] & 0xF; }
-static int get_hash_1(int index)       { return crypt_out[index][0] & 0xFF; }
-static int get_hash_2(int index)       { return crypt_out[index][0] & 0xFFF; }
-static int get_hash_3(int index)       { return crypt_out[index][0] & 0xFFFF; }
-static int get_hash_4(int index)       { return crypt_out[index][0] & 0xFFFFF; }
-static int get_hash_5(int index)       { return crypt_out[index][0] & 0xFFFFFF; }
-static int get_hash_6(int index)       { return crypt_out[index][0] & 0x7FFFFFF; }
+static int get_hash_0(int index)       { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index)       { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index)       { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index)       { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index)       { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index)       { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index)       { return crypt_out[index][0] & PH_MASK_6; }
 
 static int salt_hash(void *salt)
 {
@@ -467,9 +472,7 @@ struct fmt_main fmt_clipperz = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -480,9 +483,7 @@ struct fmt_main fmt_clipperz = {
 		split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

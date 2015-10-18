@@ -35,7 +35,9 @@ john_register_one(&fmt_cloud_keychain);
 #include "pbkdf2_hmac_sha512.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               1
+#endif
 #endif
 #include "memdbg.h"
 
@@ -130,12 +132,12 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	ctcopy += 15;
 	if ((p = strtokm(ctcopy, "$")) == NULL)	/* salt length */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	len = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL)	/* salt */
 		goto err;
-	if (!ishex(p))
-		goto err;
-	if(strlen(p) != len * 2)	/* validates salt_len also */
+	if (hexlenl(p)/2 != len)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* iterations */
 		goto err;
@@ -143,12 +145,12 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* masterkey length */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	len = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL)	/* masterkey */
 		goto err;
-	if (!ishex(p))
-		goto err;
-	if(strlen(p) != len * 2)	/* validates masterkey_len also */
+	if (hexlenl(p)/2 != len)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* plaintext length */
 		goto err;
@@ -156,47 +158,47 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* iv length */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	len = atoi(p);
-	if(len > IVLEN || len < 0)
+	if (len > IVLEN)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* iv */
 		goto err;
-	if(strlen(p) != len * 2)	/* validates iv_len */
-		goto err;
-	if (!ishex(p))
+	if (hexlenl(p) / 2 != len)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* cryptext length */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	len = atoi(p);
-	if (len > CTLEN || len < 0)
+	if (len > CTLEN)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* cryptext */
 		goto err;
-	if (!ishex(p))
-		goto err;
-	if(strlen(p) != len * 2)	/* validates cryptext_len */
+	if (hexlenl(p)/2 != len)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* expectedhmac length */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	len = atoi(p);
-	if (len > EHMLEN || len < 0)
+	if (len > EHMLEN)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* expectedhmac */
 		goto err;
-	if (!ishex(p))
-		goto err;
-	if(strlen(p) != len * 2)	/* validates expectedhmac_len */
+	if (hexlenl(p)/2 != len)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* hmacdata length */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	len = atoi(p);
-	if (len > CTLEN || len < 0)
+	if (len > CTLEN)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* hmacdata */
 		goto err;
-	if (!ishex(p))
-		goto err;
-	if(strlen(p) != len * 2)	/* validates hmacdata_len */
+	if (hexlenl(p)/2 != len)
 		goto err;
 
 	MEM_FREE(keeptr);
@@ -384,7 +386,6 @@ static char *get_key(int index)
 	return saved_key[index];
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int iteration_count(void *salt)
 {
 	struct custom_salt *my_salt;
@@ -392,7 +393,6 @@ static unsigned int iteration_count(void *salt)
 	my_salt = salt;
 	return (unsigned int)my_salt->iterations;
 }
-#endif
 
 struct fmt_main fmt_cloud_keychain = {
 	{
@@ -410,11 +410,9 @@ struct fmt_main fmt_cloud_keychain = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_NOT_EXACT,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		cloud_keychain_tests
 	}, {
 		init,
@@ -425,11 +423,9 @@ struct fmt_main fmt_cloud_keychain = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

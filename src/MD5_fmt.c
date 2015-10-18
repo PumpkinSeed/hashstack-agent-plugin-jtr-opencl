@@ -14,14 +14,16 @@
 
 #include "arch.h"
 #include "misc.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 #include "MD5_std.h"
 #include "common.h"
 #include "formats.h"
 #include "cryptmd5_common.h"
 
-#if defined(_OPENMP) && defined(MD5_SSE_PARA)
+#if defined(_OPENMP) && defined(SIMD_PARA_MD5)
+#ifndef OMP_SCALE
 #define OMP_SCALE			4
+#endif
 #include <omp.h>
 #endif
 #include "memdbg.h"
@@ -35,7 +37,7 @@
 #define PLAINTEXT_LENGTH		15
 #define CIPHERTEXT_LENGTH		22
 
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 #define BINARY_SIZE			16
 #else
 #define BINARY_SIZE			4
@@ -77,11 +79,47 @@ static struct fmt_tests tests[] = {
 	{"$1$JVDbGx8K$T9h8HK4LZxeLPMTAxCfpc1", "password"},
 	{"$1$1Cu6fEvv$42kuaJ5fMEqyVStPuFG040", "0123456789ABCDE"},
 	{"$1$ql5x.xXL$vYVDhExol2xUBBpERRWcn1", "jtr>hashcat"},
+	{"$1$27iyq7Ya$miN09fW1Scj0DHVNyewoU/", ""},
+	{"$1$84Othc1n$v1cuReaa5lRdGuHaOa76n0", "a"},
+	{"$1$4zq0BsCR$U2ua9WZtDEhzy4gFSiLxN1", "aa"},
+	{"$1$DKwjKWxp$PY6PdlPZsXjOppPDoFOz4.", "aaa"},
+	{"$1$OKDV6ppN$viTVmH48bSePiCrMvXT/./", "aaaa"},
+	{"$1$QEWsCY0O$xrTTMKTepiHMp7Oxgz0pX/", "aaaaa"},
+	{"$1$5dfdk2dF$XiJBPNrfKcCgdQ/kcoB40/", "aaaaaa"},
+	{"$1$Ps6A1Cy6$WsvLg9cQhm9JU0rXkLEtz.", "aaaaaaa"},
+	{"$1$9IK7nZ4M$4nx7Mdj05KGPJX/mZaDrh.", "aaaaaaaa"},
+	{"$1$l3pNTqwT$GAc.dcRaxCvC20CFGCjp4/", "aaaaaaaaa"},
+	{"$1$jSAARhJR$6daQ/ekjAL0MgOUgGJyp10", "aaaaaaaaaa"},
+	{"$1$wk3Xwqqg$2AtdiucwJvJgbaVT1jWpb0", "aaaaaaaaaaa"},
+	{"$1$G6Fn69Ei$d7AKJUOIdz/gO4Utc0TQP1", "aaaaaaaaaaaa"},
+	{"$1$A7XJ7lGK$W5jTnH/4lW4XwZ.6F7n1N.", "aaaaaaaaaaaaa"},
+	{"$1$Rcm46RfA$LfdIK/OP16yHzMYHSlx/B.", "aaaaaaaaaaaaaa"},
+	{"$1$4bCSSJMN$TcYKTsukD4SFJE1n4MwMZ/", "aaaaaaaaaaaaaaa"},
+#if PLAINTEXT_LENGTH > 15
+	{"$1$mJxBkkl8$u7OHfWCPmNxvf0um7hH89.", "aaaaaaaaaaaaaaaa"},
+	{"$1$Ub1gBUt4$TNaLxU7Pq5mk/MiDEb60b/", "aaaaaaaaaaaaaaaaa"},
+	{"$1$8ot7QScR$x.p4vjIgdFxxS83x29PkJ0", "aaaaaaaaaaaaaaaaaa"},
+	{"$1$wRi4OjD3$eJjKD2AwLMWfOTRYA30zn.", "aaaaaaaaaaaaaaaaaaa"},
+	{"$1$lmektrsg$2KSRY4EUFzsYNMg80fG4/0", "aaaaaaaaaaaaaaaaaaaa"},
+	{"$1$tgVBKBmE$YRvzsi7qHP2MC1Atg8VCV.", "aaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$oTsk88YC$Eh435T1BQzmjQekfqkHof/", "aaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$ykxSZEfP$hJrFeGOFk049L.94Mgggj/", "aaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$LBK4p5tD$5/gAIx8/7hpTVwDC/.KQv/", "aaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$fkEasaUI$G7CelOWHkol2nVHN8XQP40", "aaaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$gRevVzeY$eMMQrsl5OHL5dP1p/ktJc/", "aaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$164TNEjj$ppoV6Ju6Vu63j1OlM4zit/", "aaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$ErPmhjp2$lZZstb2M455Xhk50eeH4i/", "aaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$NUssS5fT$QaS4Ywt0IwzxbE0FAGnXn0", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$NxlTyiJ7$gxkXTEJdeTzY8P6tqKmcz.", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$Cmy9x7gW$kamvHI42Kh1CH4Shy6g6S/", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$IsuapfCX$4Yq0Adq5nNZgl0LwbSl5Y0", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	{"$1$rSZfNcKX$N4XPvGrfhKsyoEcRSaqmG0", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+#endif
 	{NULL}
 };
 
 static char (*saved_key)[PLAINTEXT_LENGTH + 1];
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 static unsigned char cursalt[SALT_SIZE];
 static int CryptType;
 static MD5_word (*sout);
@@ -91,7 +129,7 @@ static int omp_para = 1;
 static void init(struct fmt_main *self)
 {
 	MD5_std_init(self);
-#if defined(_OPENMP) && defined(MD5_SSE_PARA)
+#if defined(_OPENMP) && defined(SIMD_PARA_MD5)
 	omp_para = omp_get_max_threads();
 	if (omp_para < 1)
 		omp_para = 1;
@@ -105,7 +143,7 @@ static void init(struct fmt_main *self)
 
 	saved_key = mem_calloc_align(self->params.max_keys_per_crypt,
 	                             sizeof(*saved_key), MEM_ALIGN_CACHE);
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	sout = mem_calloc(self->params.max_keys_per_crypt,
 	                  sizeof(*sout) * BINARY_SIZE);
 #endif
@@ -113,7 +151,7 @@ static void init(struct fmt_main *self)
 
 static void done(void)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	MEM_FREE(sout);
 #endif
 	MEM_FREE(saved_key);
@@ -121,92 +159,92 @@ static void done(void)
 
 static int get_hash_0(int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 	x = index&(SIMD_COEF_32-1);
 	y = (unsigned int)index/SIMD_COEF_32;
-	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & 0xF;
+	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & PH_MASK_0;
 #else
 	init_t();
-	return MD5_out[index][0] & 0xF;
+	return MD5_out[index][0] & PH_MASK_0;
 #endif
 }
 
 static int get_hash_1(int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 	x = index&(SIMD_COEF_32-1);
 	y = (unsigned int)index/SIMD_COEF_32;
-	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & 0xFF;
+	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & PH_MASK_1;
 #else
 	init_t();
-	return MD5_out[index][0] & 0xFF;
+	return MD5_out[index][0] & PH_MASK_1;
 #endif
 }
 
 static int get_hash_2(int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 	x = index&(SIMD_COEF_32-1);
 	y = (unsigned int)index/SIMD_COEF_32;
-	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & 0xFFF;
+	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & PH_MASK_2;
 #else
 	init_t();
-	return MD5_out[index][0] & 0xFFF;
+	return MD5_out[index][0] & PH_MASK_2;
 #endif
 }
 
 static int get_hash_3(int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 	x = index&(SIMD_COEF_32-1);
 	y = (unsigned int)index/SIMD_COEF_32;
-	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & 0xFFFF;
+	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & PH_MASK_3;
 #else
 	init_t();
-	return MD5_out[index][0] & 0xFFFF;
+	return MD5_out[index][0] & PH_MASK_3;
 #endif
 }
 
 static int get_hash_4(int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 	x = index&(SIMD_COEF_32-1);
 	y = (unsigned int)index/SIMD_COEF_32;
-	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & 0xFFFFF;
+	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & PH_MASK_4;
 #else
 	init_t();
-	return MD5_out[index][0] & 0xFFFFF;
+	return MD5_out[index][0] & PH_MASK_4;
 #endif
 }
 
 static int get_hash_5(int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 	x = index&(SIMD_COEF_32-1);
 	y = (unsigned int)index/SIMD_COEF_32;
-	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & 0xFFFFFF;
+	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & PH_MASK_5;
 #else
 	init_t();
-	return MD5_out[index][0] & 0xFFFFFF;
+	return MD5_out[index][0] & PH_MASK_5;
 #endif
 }
 
 static int get_hash_6(int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 	x = index&(SIMD_COEF_32-1);
 	y = (unsigned int)index/SIMD_COEF_32;
-	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & 0x7FFFFFF;
+	return ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] & PH_MASK_6;
 #else
 	init_t();
-	return MD5_out[index][0] & 0x7FFFFFF;
+	return MD5_out[index][0] & PH_MASK_6;
 #endif
 }
 
@@ -232,7 +270,7 @@ static int salt_hash(void *salt)
 
 static void set_key(char *key, int index)
 {
-#ifndef MD5_SSE_PARA
+#ifndef SIMD_PARA_MD5
 	MD5_std_set_key(key, index);
 #endif
 
@@ -249,7 +287,7 @@ static char *get_key(int index)
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
 	const int count = *pcount;
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 #ifdef _OPENMP
 	int t;
 #pragma omp parallel for
@@ -266,10 +304,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 static int cmp_all(void *binary, int count)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 
-	for(y=0;y<MD5_SSE_PARA*omp_para;y++) for(x=0;x<SIMD_COEF_32;x++)
+	for(y=0;y<SIMD_PARA_MD5*omp_para;y++) for(x=0;x<SIMD_COEF_32;x++)
 	{
 		if( ((MD5_word *)binary)[0] == ((MD5_word *)sout)[x+y*SIMD_COEF_32*4] )
 			return 1;
@@ -295,7 +333,7 @@ static int cmp_all(void *binary, int count)
 
 static int cmp_one(void *binary, int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	unsigned int x,y;
 	x = index&(SIMD_COEF_32-1);
 	y = (unsigned int)index/SIMD_COEF_32;
@@ -317,7 +355,7 @@ static int cmp_one(void *binary, int index)
 
 static int cmp_exact(char *source, int index)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	return 1;
 #else
 	init_t();
@@ -328,7 +366,7 @@ static int cmp_exact(char *source, int index)
 
 static void set_salt(void *salt)
 {
-#ifdef MD5_SSE_PARA
+#ifdef SIMD_PARA_MD5
 	memcpy(cursalt, salt, SALT_SIZE);
 	CryptType = cursalt[8];
 	cursalt[8] = 0;
@@ -359,13 +397,11 @@ struct fmt_main fmt_MD5 = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-#if MD5_std_mt || defined(MD5_SSE_PARA)
+#if MD5_std_mt || defined(SIMD_PARA_MD5)
 		FMT_OMP |
 #endif
 		FMT_CASE | FMT_8_BIT,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -376,9 +412,7 @@ struct fmt_main fmt_MD5 = {
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

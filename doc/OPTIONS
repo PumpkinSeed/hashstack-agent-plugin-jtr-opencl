@@ -51,7 +51,8 @@ each line will be used. If FILE is not specified, the active .pot file will
 be used. This is very effective for applying rules to further permute words
 that has been successful, or without rules after a run using --salts in case
 the cracks are successful on other salts than the ones that has already been
-attacked.
+attacked. Note that by default, some rules are applied too (see john.conf
+"LoopbackRules"). To disable that for a run, just use --rules=none.
 
 --encoding=NAME
 
@@ -124,6 +125,19 @@ information, first send a SIGHUP to the appropriate "john" process.
 if --show=left then all uncracked hashes are listed (in a john 'input'
 file format way).  =left is just that literal string "=left".
 
+--show=type				show the types found in the input file
+
+Shows the types of input hashes contained in the input file.
+
+--show=invalid			show lines in the input file that fail valid()
+
+Shows the input hash lines which fail the valid() function (i.e. these
+hashes have something wrong with them and would not be processed).
+When using this mode, you will want to run against a solid file,
+that is made up of just one type hash.  Also, the --format=xx flag
+is not required, but if not used, then the first valid line of the
+file will be used as the format type.
+
 --test[=TIME]			run tests and benchmarks for TIME seconds each
 
 Tests all of the compiled in hashing algorithms for proper operation and
@@ -189,12 +203,20 @@ john.pot-like file (to start from, and to store any found password into).
 --save-memory=LEVEL		enable memory saving, at LEVEL 1..3
 
 You might need this option if you don't have enough memory or don't
-want John to affect other processes too much.  Level 1 tells John to
-not waste memory on login names; it is only supported when a cracking
-mode other than "single crack" is explicitly requested.  The only
-impact is that you won't see the login names while cracking.  Higher
-memory saving levels have a performance impact; you should probably
-avoid using them unless John doesn't work or gets into swap otherwise.
+want John to affect other processes too much or don't need it to load
+and print login names along with cracked passwords.  Level 1 tells John
+not to waste memory on login names; it is only supported when a cracking
+mode other than "single crack" is explicitly requested.  It has no
+negative performance impact - in fact, it sometimes speeds things up.
+Please note that without the --save-memory=1 option (or higher), John
+will waste some memory on potential login names even if the password
+hash files don't happen to contain any login names.  (The complete lack
+of login names isn't known to John when it starts parsing the files, so
+it has to record the fact that each individual entry doesn't have a
+login name unless you specify this option.)  Levels 2 and 3 reduce use
+of performance optimizations involving large lookup tables, and thus
+have a negative performance impact.  You should probably avoid using
+them unless John doesn't work or gets into swap otherwise.
 
 --node=MIN[-MAX]/TOTAL		this node's number range out of TOTAL count
 
@@ -335,11 +357,11 @@ separate invocations of John, one per hash type.
 One of the significant performance improvements for some builds of
 john, is preloading the wordlist file into memory, instead of reading
 line by line. This is especially true when running with a large list of
---rules. The default max size file is 5000000 bytes. Using this option
+--rules. The default max size file is one gigabyte. Using this option
 allows making this larger.  A special value is --mem-file-size=0. This
 will force loading to memory regardless of file size (take care not to
 exceed your physical memory limits, or things will just run much slower).
-NOTE if --save-memory is used, preload will be disabled.
+NOTE if --save-memory > 2, default preload will be disabled.
 
 --field-separator-char=c	Use 'c' instead of the char ':'
 
@@ -424,11 +446,22 @@ lengths of 9, 10 and so on.
 Gracefully exit after N seconds. If you resume it, it will run for another N
 seconds and exit again.
 
+--keep-guessing			search for alternative plaintexts
+
+Some formats has plaintext collisions. That means some (or many) different
+plaintexts will result in the same hash, so are equally valid. It may be due
+to a design flaw as in BFEgg, or due to limited binary size as in CRC-32 - or
+artificially limited keyspace as in Office formats before 2007 (a good sized
+key is truncated to 40-bit on purpose - thank you Microsoft). When this option
+is used a successful crack will not result in that hash being removed from
+further cracking, so you can use it to find alternative plaintexts.
+
 --reject-printable		reject printable binaries
 
 This esoteric option can be used to filter out many bogus hashes. It only works
 well with not to small binary sizes. Rejected hashes are printed (as text) to
-stderr.
+stderr. It may fail to work with some formats that eg. reverses steps. A good
+example of that is it does not work with NT format, but works fine with NT2.
 
 --verbosity=N			change verbosity
 
@@ -439,9 +472,14 @@ OpenCL formats and level 1 will mute printing of cracked passwords to screen.
 --skip-self-tests		skip self tests
 
 Tells John to skip self tests. Basic integrity checks will be done but hashes
-from test vector will not be cracked. This option is useful to run many small
+from test vectors will not be cracked. This option is useful to run many small
 attacks in a row against slow hashes. Usually it is not needed. It affects
 --test option: --skip-self-tests and --test together perform only benchmarks.
+
+--stress-test=N			continuous self-test
+
+This is exactly like --test or --test=N except it loops until aborted by user.
+It's mostly for debugging.
 
 --list=WHAT			list capabilities
 
@@ -591,6 +629,3 @@ john.pot and applying all of the defined external mode filters.  To
 speed it up on a sufficiently large computer (RAM and CPUs), "&" may be
 added after the John invocation inside the script (to run all of them in
 parallel).
-
-Based on (and modified in the jumbo patch):
-$Owl: Owl/packages/john/john/doc/OPTIONS,v 1.19 2013/05/29 20:20:08 solar Exp $

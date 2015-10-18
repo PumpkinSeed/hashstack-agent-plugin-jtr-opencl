@@ -98,38 +98,40 @@ static void *skey_salt(char *ciphertext);
 static int
 skey_valid(char *ciphertext, struct fmt_main *self)
 {
-	char *p, *q, buf[24];
+	char *p, buf[128];
 
 	if (*ciphertext == '#')
-		return (0);
+		return 0;
 
 	strnzcpy(buf, ciphertext, sizeof(buf));
 
-	if ((p = strchr(buf, ' ')) == NULL)
-		return (0);
-	*p++ = '\0';
+	if ((p = strtok(buf, " \t")) == NULL)
+		return 0;
 
-	if (isalpha((unsigned char)(*buf))) {
-		if (skey_set_algorithm(buf) == NULL ||
-		    (q = strchr(p, ' ')) == NULL)
-			return (0);
-		*q = '\0';
+	if (isalpha((unsigned char)(*p))) {
+		if (skey_set_algorithm(p) == NULL)
+			return 0;
+		if ((p = strtok(NULL, " \t")) == NULL)
+			return 0;
 	}
-	else p = buf;
 
 	for ( ; *p; p++) {
 		if (!isdigit( ((unsigned char)(*p))))
-			return (0);
+			return 0;
 	}
-
-	p = strrchr(ciphertext, ' ');
-	if (hexlen(++p) != (2 * SKEY_BINKEY_SIZE))
+	if ((p = strtok(NULL, " \t")) == NULL)
+		return 0;
+	if (strlen(p) > SKEY_MAX_SEED_LEN)
+		return 0;
+	if ((p = strtok(NULL, " \t")) == NULL)
+		return 0;
+	if (hexlenl(p) != (2 * SKEY_BINKEY_SIZE))
 		return 0;
 
 	if (!skey_salt(ciphertext))
 		return 0;
 
-	return (1);
+	return 1;
 }
 
 static int
@@ -159,7 +161,7 @@ hex_decode(char *src, unsigned char *dst, int outsize)
 }
 
 // Since our test strings have 1 space as first delim, and 2 spaces as 2nd
-// delim, then it is NOT equivelant to use strtokm() vs strtok.
+// delim, then it is NOT equivalent to use strtokm() vs strtok.
 static void *
 skey_salt(char *ciphertext)
 {
@@ -191,24 +193,26 @@ skey_salt(char *ciphertext)
 }
 
 // Since our test strings have 1 space as first delim, and 2 spaces as 2nd
-// delim, then it is NOT equivelant to use strtokm() vs strtok.
+// delim, then it is NOT equivalent to use strtokm() vs strtok.
 static void *get_binary(char *ciphertext)
 {
 	static unsigned char *realcipher;
-	char buf[128], *p;
+	char *ctcopy, *p;
 
 	if (!realcipher)
 		realcipher = mem_alloc_tiny(SKEY_BINKEY_SIZE, MEM_ALIGN_WORD);
-	strnzcpy(buf, ciphertext, sizeof(buf));
+	ctcopy = strdup(ciphertext);
+	p = strtok(ctcopy, " \t");
 
-	p = strtok(buf, " \t");
 	if (isalpha((unsigned char)(*p)))
 		strtok(NULL, " \t");
 	strtok(NULL, " \t");
 	p = strtok(NULL, " \t");
+
 	memset(realcipher, 0, SKEY_BINKEY_SIZE);
 	hex_decode(p, realcipher,SKEY_BINKEY_SIZE);
 
+	MEM_FREE(ctcopy);
 	return realcipher;
 }
 
@@ -266,7 +270,6 @@ skey_cmp_exact(char *source, int index)
 	return 1;
 }
 
-#if FMT_MAIN_VERSION > 11
 /*
  * report hash type as first tunable cost, even though the iteration count
  * might be more important with regard to CPU time
@@ -299,13 +302,13 @@ static unsigned int skey_hash_type(void *salt)
 		return (unsigned int) 0;
 }
 
-static int get_hash_0(int index) { return saved_key[0] & 0xf; }
-static int get_hash_1(int index) { return saved_key[0] & 0xff; }
-static int get_hash_2(int index) { return saved_key[0] & 0xfff; }
-static int get_hash_3(int index) { return saved_key[0] & 0xffff; }
-static int get_hash_4(int index) { return saved_key[0] & 0xfffff; }
-static int get_hash_5(int index) { return saved_key[0] & 0xffffff; }
-static int get_hash_6(int index) { return saved_key[0] & 0x7ffffff; }
+static int get_hash_0(int index) { return saved_key[0] & PH_MASK_0; }
+static int get_hash_1(int index) { return saved_key[0] & PH_MASK_1; }
+static int get_hash_2(int index) { return saved_key[0] & PH_MASK_2; }
+static int get_hash_3(int index) { return saved_key[0] & PH_MASK_3; }
+static int get_hash_4(int index) { return saved_key[0] & PH_MASK_4; }
+static int get_hash_5(int index) { return saved_key[0] & PH_MASK_5; }
+static int get_hash_6(int index) { return saved_key[0] & PH_MASK_6; }
 
 /* iteration count as 2nd tunable cost */
 static unsigned int skey_iteration_count(void *salt)
@@ -315,7 +318,6 @@ static unsigned int skey_iteration_count(void *salt)
 	my_salt = (struct skey_salt_st*)salt;
 	return (unsigned int) my_salt->num;
 }
-#endif
 
 struct fmt_main fmt_SKEY = {
 	{
@@ -333,12 +335,10 @@ struct fmt_main fmt_SKEY = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT,
-#if FMT_MAIN_VERSION > 11
 		{
 			"hash type [1:MD4 2:MD5 3:SHA1 4:RMD160]",
 			"iteration count",
 		},
-#endif
 		skey_tests
 	}, {
 		fmt_default_init,
@@ -349,12 +349,10 @@ struct fmt_main fmt_SKEY = {
 		fmt_default_split,
 		get_binary,
 		skey_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			skey_hash_type,
 			skey_iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

@@ -8,6 +8,7 @@
 #include "common.h"
 #include "formats.h"
 #include "BF_common.h"
+#include "memdbg.h"
 
 struct fmt_tests BF_common_tests[] = {
 
@@ -158,7 +159,6 @@ void *BF_common_get_salt(char *ciphertext) {
 
 	return &salt;
 }
-#if FMT_MAIN_VERSION > 11
 /* For BF, the tunable cost parameter is the iteration count */
 unsigned int BF_common_iteration_count(void *salt) {
 	BF_salt *bf_salt;
@@ -166,7 +166,6 @@ unsigned int BF_common_iteration_count(void *salt) {
 	bf_salt = (BF_salt *) salt;
 	return (unsigned int) (1 << bf_salt->rounds);
 }
-#endif
 
 #if ARCH_LITTLE_ENDIAN
 void BF_swap(BF_word *x, int count)

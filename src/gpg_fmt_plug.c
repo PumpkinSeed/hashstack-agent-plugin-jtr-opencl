@@ -39,7 +39,9 @@ john_register_one(&fmt_gpg);
 
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               64
+#endif
 #endif
 
 #include "arch.h"
@@ -107,14 +109,14 @@ enum {
 
 
 enum {
-	PKA_UNKOWN = 0,
+	PKA_UNKNOWN = 0,
 	PKA_RSA_ENCSIGN = 1,
 	PKA_DSA = 17,
 	PKA_EG = 20
 };
 
 enum {
-	CIPHER_UNKOWN = -1,
+	CIPHER_UNKNOWN = -1,
 	CIPHER_CAST5 = 3,
 	CIPHER_BLOWFISH = 4,
 	CIPHER_AES128 = 7,
@@ -125,7 +127,7 @@ enum {
 };
 
 enum {
-	HASH_UNKOWN = -1,
+	HASH_UNKNOWN = -1,
 	HASH_MD5 = 1,
 	HASH_SHA1 = 2,
 	HASH_RIPEMD160 = 3,
@@ -251,11 +253,17 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
+	saved_key = mem_calloc_align(sizeof(*saved_key),
 			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
 	any_cracked = 0;
 	cracked_size = sizeof(*cracked) * self->params.max_keys_per_crypt;
-	cracked = mem_calloc_tiny(cracked_size, MEM_ALIGN_WORD);
+	cracked = mem_calloc_align(sizeof(*cracked), self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+}
+
+static void done(void)
+{
+	MEM_FREE(cracked);
+	MEM_FREE(saved_key);
 }
 
 static int valid_cipher_algorithm(int cipher_algorithm)
@@ -307,74 +315,75 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	ctcopy += 6;	/* skip over "$gpg$" marker and '*' */
 	if ((p = strtokm(ctcopy, "*")) == NULL)	/* algorithm */
 		goto err;
-	algorithm = atoi(p);
+	if (!isdec(p))
+		goto err;
+	algorithm = atoi(p); // FIXME: which values are valid?
 	if ((p = strtokm(NULL, "*")) == NULL)	/* datalen */
+		goto err;
+	if (!isdec(p))
 		goto err;
 	res = atoi(p);
 	if (res > BIG_ENOUGH * 2)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* bits */
 		goto err;
-	if (!isdec(p))
+	if (!isdec(p)) // FIXME: bits == 0 allowed?
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* data */
 		goto err;
-	if (strlen(p) != res * 2)
-		goto err;
-	if (!ishex(p))
+	if (hexlenl(p) != res*2)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* spec */
 		goto err;
-	spec = atoi(p);
 	if (!isdec(p))
 		goto err;
+	spec = atoi(p);
 	if ((p = strtokm(NULL, "*")) == NULL)	/* usage */
 		goto err;
-	usage = atoi(p);
 	if (!isdec(p))
 		goto err;
+	usage = atoi(p);
 	if(usage != 0 && usage != 254 && usage != 255 && usage != 1)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* hash_algorithm */
 		goto err;
-	res = atoi(p);
 	if (!isdec(p))
 		goto err;
+	res = atoi(p);
 	if(!valid_hash_algorithm(res, spec))
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* cipher_algorithm */
 		goto err;
-	res = atoi(p);
 	if (!isdec(p))
 		goto err;
+	res = atoi(p);
 	if(!valid_cipher_algorithm(res))
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* ivlen */
+		goto err;
+	if (!isdec(p))
 		goto err;
 	res = atoi(p);
 	if (res != 8 && res != 16)
 		goto err;
 	if ((p = strtokm(NULL, "*")) == NULL)	/* iv */
 		goto err;
-	if (strlen(p) != res * 2)
-		goto err;
-	if (!ishex(p))
+	if (hexlenl(p) != res*2)
 		goto err;
 	/* handle "SPEC_SIMPLE" correctly */
-	if (spec == 0) {
+	if ((spec != 0 || usage == 255))
+		;
+	else if (spec == 0) {
 		MEM_FREE(keeptr);
 		return 1;
 	}
 	if ((p = strtokm(NULL, "*")) == NULL)	/* count */
 		goto err;
-	if (!isdec(p))
+	if (!isdec(p)) // FIXME: count == 0 allowed?
 		goto err;
-	res = atoi(p);
 	if ((p = strtokm(NULL, "*")) == NULL)	/* salt */
 		goto err;
-	if (strlen(p) != SALT_LENGTH * 2)
-		goto err;
-	if (!ishex(p))
+	if (hexlenl(p) != SALT_LENGTH*2)
 		goto err;
 	/*
 	 * For some test vectors, there are no more fields,
@@ -402,14 +411,14 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	for (j = 0; j < ex_flds; ++j) {  /* handle extra p, q, g, y fields */
 		if (!p) /* check for null p */
 			goto err;
+		if (!isdec(p))
+			goto err;
 		res = atoi(p);
 		if (res > BIG_ENOUGH * 2)
-			goto err;
+			goto err; // FIXME: warn if BIG_ENOUGH isn't big enough?
 		if ((p = strtokm(NULL, "*")) == NULL)
 			goto err;
-		if (strlen(p) != res * 2) /* validates res is a valid int */
-			goto err;
-		if (!ishex(p))
+		if (hexlenl(p) != res*2)
 			goto err;
 		p = strtokm(NULL, "*");  /* NOTE, do not goto err if null, we WANT p nul if there are no fields */
 	}
@@ -853,7 +862,10 @@ static void *get_salt(char *ciphertext)
 					case HASH_MD5:
 						cs.s2kfun = S2KSaltedMD5Generator;
 						break;
-					default: break;
+					default:
+						// WTF? (see valid_hash_algorithm() function)
+						cs.s2kfun = S2KSaltedSHA1Generator;
+						break;
 				}
 			}
 			break;
@@ -1188,6 +1200,7 @@ static int check(unsigned char *keydata, int ks)
 			RSA_secret_key rsa;
 			if (strlen(str) != blen * 2) { /* verifier 2 */
 				OPENSSL_free(str);
+				BN_free(b);
 				return 0;
 			}
 			OPENSSL_free(str);
@@ -1230,6 +1243,8 @@ static int check(unsigned char *keydata, int ks)
 				rsa.p = BN_bin2bn(cur_salt->p, cur_salt->pl, NULL);
 				rsa.q = BN_bin2bn(cur_salt->q, cur_salt->ql, NULL);
 
+				// b is not used.  So we must free it, or we have a leak.
+				BN_free(b);
 				ret = check_rsa_secret_key(&rsa);
 				if (ret != 0)
 					return 0;
@@ -1290,7 +1305,6 @@ static int cmp_exact(char *source, int index)
 	return 1;
 }
 
-#if FMT_MAIN_VERSION > 11
 /*
  * Report gpg --s2k-count n as 1st tunable cost,
  * hash algorithm as 2nd tunable cost,
@@ -1327,7 +1341,6 @@ static unsigned int gpg_cipher_algorithm(void *salt)
 	my_salt = salt;
 	return (unsigned int) my_salt->cipher_algorithm;
 }
-#endif
 
 struct fmt_main fmt_gpg = {
 	{
@@ -1345,31 +1358,27 @@ struct fmt_main fmt_gpg = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			"s2k-count", /* only for gpg --s2k-mode 3, see man gpg, option --s2k-count n */
 			"hash algorithm [1:MD5 2:SHA1 3:RIPEMD160 8:SHA256 9:SHA384 10:SHA512 11:SHA224]",
 			"cipher algorithm [1:IDEA 2:3DES 3:CAST5 4:Blowfish 7:AES128 8:AES192 9:AES256]",
 		},
-#endif
 		gpg_tests
 	},
 	{
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid,
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			gpg_s2k_count,
 			gpg_hash_algorithm,
 			gpg_cipher_algorithm,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

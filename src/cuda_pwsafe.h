@@ -7,8 +7,7 @@
 #ifndef _CUDA_PWSAFE_H
 #define _CUDA_PWSAFE_H
 #include "common.h"
-#define uint8_t                 unsigned char
-#define uint32_t                unsigned int
+#include "stdint.h"
 
 #define GPUS                    1
 #define THREADS                 128
@@ -16,12 +15,10 @@
 #define KEYS_PER_GPU            THREADS*BLOCKS
 #define KEYS_PER_CRYPT          KEYS_PER_GPU*GPUS
 
-#define MIN(a,b) (((a)<(b))?(a):(b))
-#define MAX(a,b) (((a)>(b))?(a):(b))
 #define rol(x,n) ((x << n) | (x >> (32-n)))
 #define ror(x,n) ((x >> n) | (x << (32-n)))
 #define Ch(x, y, z) (z ^ (x & (y ^ z)))
-#define Maj(x, y, z) ((y & z) | (x & (y | z)))
+#define Maj(x, y, z) ((x & y) | (z & (x | y)))
 #define Sigma0(x) ((ror(x,2))  ^ (ror(x,13)) ^ (ror(x,22)))
 #define Sigma1(x) ((ror(x,6))  ^ (ror(x,11)) ^ (ror(x,25)))
 #define sigma0(x) ((ror(x,7))  ^ (ror(x,18)) ^ (x>>3))

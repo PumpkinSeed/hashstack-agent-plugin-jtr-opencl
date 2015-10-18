@@ -24,7 +24,7 @@ john_register_one(&fmt_opencl_mscash2);
 #include "md4.h"
 #include "sha.h"
 #include "unicode.h"
-#include "common_opencl_pbkdf2.h"
+#include "opencl_mscash2_helper_plug.h"
 #include "loader.h"
 #include "config.h"
 #include "memdbg.h"
@@ -36,8 +36,6 @@ john_register_one(&fmt_opencl_mscash2);
 #define SQRT_2                      0x5a827999
 #define SQRT_3                      0x6ed9eba1
 
-
-#define FORMAT_LABEL	           "mscash2-opencl"
 #define FORMAT_NAME		   "MS Cache Hash 2 (DCC2)"
 #define KERNEL_NAME		   "PBKDF2"
 #define ALGORITHM_NAME		   "PBKDF2-SHA1 OpenCL"
@@ -45,6 +43,9 @@ john_register_one(&fmt_opencl_mscash2);
 #define BENCHMARK_LENGTH	  -1
 #define MSCASH2_PREFIX            "$DCC2$"
 #define MAX_PLAINTEXT_LENGTH      125
+
+#define MAX_KEYS_PER_CRYPT        1
+#define MIN_KEYS_PER_CRYPT        1
 
 #define BINARY_SIZE               4
 #define BINARY_ALIGN              4
@@ -89,41 +90,54 @@ static cl_uint 		*dcc2_hash_host ;
 static unsigned char 	(*key_host)[MAX_PLAINTEXT_LENGTH + 1] ;
 static ms_cash2_salt 	currentsalt ;
 static cl_uint          *hmac_sha1_out ;
+static struct fmt_main  *self = NULL;
 
 extern int mscash2_valid(char *, int,  struct fmt_main *);
 extern char * mscash2_prepare(char **, struct fmt_main *);
 extern char * mscash2_split(char *, int, struct fmt_main *);
 
 static void set_key(char*, int) ;
-static int crypt_all(int *pcount, struct db_salt *salt) ;
 
-static void init(struct fmt_main *self) {
-	int 	i ;
-
+static void init(struct fmt_main *__self)
+{
 	//Prepare OpenCL environment.
 	opencl_preinit();
-
-	///Allocate memory
-	key_host = mem_calloc(self -> params.max_keys_per_crypt, sizeof(*key_host)) ;
-	dcc_hash_host = (cl_uint*)mem_alloc(4 * sizeof(cl_uint) * MAX_KEYS_PER_CRYPT) ;
-	dcc2_hash_host = (cl_uint*)mem_alloc(4 * sizeof(cl_uint) * MAX_KEYS_PER_CRYPT) ;
-	hmac_sha1_out  = (cl_uint*)mem_alloc(5 * sizeof(cl_uint) * MAX_KEYS_PER_CRYPT) ;
-
-	memset(dcc_hash_host, 0, 4 * sizeof(cl_uint) * MAX_KEYS_PER_CRYPT) ;
-	memset(dcc2_hash_host, 0, 4 * sizeof(cl_uint) * MAX_KEYS_PER_CRYPT) ;
 
 	/* Read LWS/GWS prefs from config or environment */
 	opencl_get_user_preferences(FORMAT_LABEL);
 
-	for( i=0; i < get_number_of_devices_in_use(); i++)
-		select_device(gpu_device_list[i], self) ;
-
-	dcc2_warning() ;
+	initNumDevices();
 
 	if (pers_opts.target_enc == UTF_8) {
-		self->params.plaintext_length *= 3;
-		if (self->params.plaintext_length > 125)
-			self->params.plaintext_length = 125;
+		__self->params.plaintext_length *= 3;
+		if (__self->params.plaintext_length > 125)
+			__self->params.plaintext_length = 125;
+	}
+
+	self = __self;
+}
+
+static void reset(struct db_main *db)
+{
+	static unsigned int initialized;
+
+	if (!initialized) {
+		unsigned int i;
+		self->params.max_keys_per_crypt = 0;
+
+		for( i=0; i < get_number_of_devices_in_use(); i++)
+			self->params.max_keys_per_crypt += selectDevice(gpu_device_list[i], self);
+
+		///Allocate memory
+		key_host = mem_calloc(self -> params.max_keys_per_crypt, sizeof(*key_host));
+		dcc_hash_host = (cl_uint*)mem_alloc(4 * sizeof(cl_uint) * self -> params.max_keys_per_crypt);
+		dcc2_hash_host = (cl_uint*)mem_alloc(4 * sizeof(cl_uint) * self -> params.max_keys_per_crypt);
+		hmac_sha1_out  = (cl_uint*)mem_alloc(5 * sizeof(cl_uint) * self -> params.max_keys_per_crypt);
+
+		memset(dcc_hash_host, 0, 4 * sizeof(cl_uint) * self -> params.max_keys_per_crypt);
+		memset(dcc2_hash_host, 0, 4 * sizeof(cl_uint) * self -> params.max_keys_per_crypt);
+
+		initialized++;
 	}
 }
 
@@ -165,7 +179,7 @@ static void done(void) {
 	MEM_FREE(dcc_hash_host) ;
 	MEM_FREE(key_host) ;
 	MEM_FREE(hmac_sha1_out);
-	clean_all_buffer() ;
+	releaseAll();
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -271,7 +285,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	struct timeval startc, endc, startg, endg ;
 	gettimeofday(&startc, NULL) ;
 #endif
-	UTF16 salt_host[MAX_SALT_LENGTH + 1];
+	UTF16 salt_host[SALT_BUFFER_SIZE >> 1];
 
 	memset(salt_host, 0, sizeof(salt_host));
 
@@ -292,8 +306,8 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 #ifdef _DEBUG
 	gettimeofday(&startg, NULL) ;
 #endif
-	///defined in common_opencl_pbkdf2.c. Details provided in common_opencl_pbkdf2.h
-	pbkdf2_divide_work(dcc_hash_host, (cl_uint*)salt_host, salt_len, currentsalt.iter_cnt, dcc2_hash_host, hmac_sha1_out, count) ;
+	///defined in opencl_mscash2_helper_plug.c. Details provided in opencl_mscash2_helper_plug.h
+	dcc2Execute(dcc_hash_host, hmac_sha1_out, (cl_uint*)salt_host, salt_len, currentsalt.iter_cnt, dcc2_hash_host, count) ;
 
 #ifdef _DEBUG
 	gettimeofday(&endg, NULL);
@@ -312,7 +326,7 @@ static int binary_hash_0(void *binary) {
 		fprintf(stderr, "%08x ", b[i]);
 	puts("") ;
 #endif
-	return (((unsigned int *) binary)[0] & 0xf) ;
+	return (((unsigned int *) binary)[0] & PH_MASK_0) ;
 }
 
 static int get_hash_0(int index) {
@@ -323,31 +337,31 @@ static int get_hash_0(int index) {
 		fprintf(stderr, "%08x ", dcc2_hash_host[index]) ;
 	puts("") ;
 #endif
-	return dcc2_hash_host[4 * index] & 0xf ;
+	return dcc2_hash_host[4 * index] & PH_MASK_0 ;
 }
 
 static int get_hash_1(int index) {
-	return dcc2_hash_host[4 * index] & 0xff ;
+	return dcc2_hash_host[4 * index] & PH_MASK_1 ;
 }
 
 static int get_hash_2(int index) {
-	return dcc2_hash_host[4 * index] & 0xfff ;
+	return dcc2_hash_host[4 * index] & PH_MASK_2 ;
 }
 
 static int get_hash_3(int index) {
-	return dcc2_hash_host[4 * index] & 0xffff ;
+	return dcc2_hash_host[4 * index] & PH_MASK_3 ;
 }
 
 static int get_hash_4(int index) {
-	return dcc2_hash_host[4 * index] & 0xfffff ;
+	return dcc2_hash_host[4 * index] & PH_MASK_4 ;
 }
 
 static int get_hash_5(int index) {
-	return dcc2_hash_host[4 * index] & 0xffffff ;
+	return dcc2_hash_host[4 * index] & PH_MASK_5 ;
 }
 
 static int get_hash_6(int index) {
-	return dcc2_hash_host[4 * index] & 0x7ffffff ;
+	return dcc2_hash_host[4 * index] & PH_MASK_6 ;
 }
 
 static int cmp_all(void *binary, int count) {
@@ -411,22 +425,18 @@ struct fmt_main fmt_opencl_mscash2 = {
 		MAX_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	},{
 		init,
 		done,
-		fmt_default_reset,
+		reset,
 		mscash2_prepare,
 		valid,
 		mscash2_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			binary_hash_0,

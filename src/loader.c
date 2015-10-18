@@ -1,6 +1,6 @@
 /*
  * This file is part of John the Ripper password cracker,
- * Copyright (c) 1996-2000,2003,2005,2010-2012 by Solar Designer
+ * Copyright (c) 1996-2000,2003,2005,2010-2012,2015 by Solar Designer
  *
  * ...with heavy changes in the jumbo patch, by magnum and various authors
  */
@@ -44,6 +44,7 @@
 #include "cracker.h"
 #include "config.h"
 #include "logger.h" /* Beware: log_init() happens after most functions here */
+#include "base64_convert.h"
 #include "memdbg.h"
 
 #ifdef HAVE_CRYPT
@@ -68,7 +69,13 @@ int ldr_in_pot = 0;
 #define SPLFLEN(f)	(fields[f][0] ? fields[f+1] - fields[f] - 1 : 0)
 
 static char *no_username = "?";
+#ifdef HAVE_FUZZ
+int pristine_gecos;
+int single_skip_login;
+#else
 static int pristine_gecos;
+static int single_skip_login;
+#endif
 
 /* There should be legislation against adding a BOM to UTF-8 */
 static char *skip_bom(char *string)
@@ -84,10 +91,10 @@ static void read_file(struct db_main *db, char *name, int flags,
 	struct stat file_stat;
 	FILE *file;
 	char line_buf[LINE_BUFFER_SIZE], *line;
-	int warn = cfg_get_bool(SECTION_OPTIONS, NULL, "WarnEncoding", 0);
+	int warn_enc;
 
-	if (!john_main_process)
-		warn = 0;
+	warn_enc = john_main_process && (pers_opts.target_enc != ASCII) &&
+		cfg_get_bool(SECTION_OPTIONS, NULL, "WarnEncoding", 0);
 
 	if (flags & RF_ALLOW_DIR) {
 		if (stat(name, &file_stat)) {
@@ -107,7 +114,7 @@ static void read_file(struct db_main *db, char *name, int flags,
 	while (fgets(line_buf, sizeof(line_buf), file)) {
 		line = skip_bom(line_buf);
 
-		if (warn) {
+		if (warn_enc) {
 			char *u8check;
 
 			if (!(flags & RF_ALLOW_MISSING) ||
@@ -120,14 +127,14 @@ static void read_file(struct db_main *db, char *name, int flags,
 			    ((flags & RF_ALLOW_DIR) &&
 			     pers_opts.input_enc == UTF_8)) {
 				if (!valid_utf8((UTF8*)u8check)) {
-					warn = 0;
+					warn_enc = 0;
 					fprintf(stderr, "Warning: invalid UTF-8"
 					        " seen reading %s\n", name);
 				}
 			} else if (pers_opts.input_enc != UTF_8 &&
 			           (line != line_buf ||
 			            valid_utf8((UTF8*)u8check) > 1)) {
-				warn = 0;
+				warn_enc = 0;
 				fprintf(stderr, "Warning: UTF-8 seen reading "
 				        "%s\n", name);
 			}
@@ -143,25 +150,38 @@ static void read_file(struct db_main *db, char *name, int flags,
 	if (fclose(file)) pexit("fclose");
 }
 
-void ldr_init_database(struct db_main *db, struct db_options *options)
+void ldr_init_database(struct db_main *db, struct db_options *db_options)
 {
 	db->loaded = 0;
 
-	db->options = mem_alloc_copy(options,
+	db->pw_size = sizeof(struct db_password);
+	db->salt_size = sizeof(struct db_salt);
+	if (!(db_options->flags & DB_WORDS)) {
+		db->pw_size -= sizeof(struct list_main *);
+		if (db_options->flags & DB_LOGIN) {
+			if (!options.show_uid_in_cracks)
+				db->pw_size -= sizeof(char *);
+		} else
+			db->pw_size -= sizeof(char *) * 2;
+		db->salt_size -= sizeof(struct db_keys *);
+	}
+
+	db->options = mem_alloc_copy(db_options,
 	    sizeof(struct db_options), MEM_ALIGN_WORD);
+
+	if (db->options->flags & DB_WORDS)
+		db->options->flags |= DB_LOGIN;
 
 	db->salts = NULL;
 
 	db->password_hash = NULL;
 	db->password_hash_func = NULL;
 
-	if (options->flags & DB_CRACKED) {
+	if (db_options->flags & DB_CRACKED) {
 		db->salt_hash = NULL;
 
-		db->cracked_hash = mem_alloc(
-			CRACKED_HASH_SIZE * sizeof(struct db_cracked *));
-		memset(db->cracked_hash, 0,
-			CRACKED_HASH_SIZE * sizeof(struct db_cracked *));
+		db->cracked_hash = mem_calloc(
+			CRACKED_HASH_SIZE, sizeof(struct db_cracked *));
 	} else {
 		db->salt_hash = mem_alloc(
 			SALT_HASH_SIZE * sizeof(struct db_salt *));
@@ -169,10 +189,6 @@ void ldr_init_database(struct db_main *db, struct db_options *options)
 			SALT_HASH_SIZE * sizeof(struct db_salt *));
 
 		db->cracked_hash = NULL;
-
-		if (options->flags & DB_WORDS)
-			options->flags |= DB_LOGIN;
-
 	}
 
 	list_init(&db->plaintexts);
@@ -193,9 +209,13 @@ static void ldr_init_password_hash(struct db_main *db)
 {
 	int (*func)(void *binary);
 	int size = PASSWORD_HASH_SIZE_FOR_LDR;
+	size_t sz;
 
-	if (size > 0 && mem_saving_level >= 2)
+	if (size >= 2 && mem_saving_level >= 2) {
 		size--;
+		if (mem_saving_level >= 3)
+			size--;
+	}
 
 	do {
 		func = db->format->methods.binary_hash[size];
@@ -205,9 +225,9 @@ static void ldr_init_password_hash(struct db_main *db)
 	if (size < 0)
 		size = 0;
 	db->password_hash_func = func;
-	size = password_hash_sizes[size] * sizeof(struct db_password *);
-	db->password_hash = mem_alloc(size);
-	memset(db->password_hash, 0, size);
+	sz = (size_t)password_hash_sizes[size] * sizeof(struct db_password *);
+	db->password_hash = mem_alloc(sz);
+	memset(db->password_hash, 0, sz);
 }
 
 static char *ldr_get_field(char **ptr, char field_sep_char)
@@ -255,7 +275,7 @@ static int ldr_check_list(struct list_main *list, char *s1, char *s2)
 	return 0;
 }
 
-static int ldr_check_shells(struct list_main *list, char *shell)
+static MAYBE_INLINE int ldr_check_shells(struct list_main *list, char *shell)
 {
 	char *name;
 
@@ -270,8 +290,9 @@ static int ldr_check_shells(struct list_main *list, char *shell)
 static void ldr_set_encoding(struct fmt_main *format)
 {
 	if ((!pers_opts.target_enc || pers_opts.default_target_enc) &&
-	    !pers_opts.internal_enc) {
+	    !pers_opts.internal_cp) {
 		if (!strcasecmp(format->params.label, "LM") ||
+		    !strcasecmp(format->params.label, "lm-opencl") ||
 		    !strcasecmp(format->params.label, "netlm") ||
 		    !strcasecmp(format->params.label, "nethalflm")) {
 			pers_opts.target_enc =
@@ -282,10 +303,10 @@ static void ldr_set_encoding(struct fmt_main *format)
 				pers_opts.default_target_enc = 1;
 			else
 				pers_opts.target_enc = pers_opts.input_enc;
-		} else if (pers_opts.internal_enc &&
+		} else if (pers_opts.internal_cp &&
 		           (format->params.flags & FMT_UNICODE) &&
 		           (format->params.flags & FMT_UTF8)) {
-			pers_opts.target_enc = pers_opts.internal_enc;
+			pers_opts.target_enc = pers_opts.internal_cp;
 		}
 	}
 
@@ -299,26 +320,25 @@ static void ldr_set_encoding(struct fmt_main *format)
 		return;
 	}
 
-	/* john.conf alternative for --internal-encoding */
+	/* john.conf alternative for --internal-codepage */
 	if (options.flags &
 	    (FLG_RULES | FLG_SINGLE_CHK | FLG_BATCH_CHK | FLG_MASK_CHK))
 	if ((!pers_opts.target_enc || pers_opts.target_enc == UTF_8) &&
-	    !pers_opts.internal_enc) {
-		if (!(pers_opts.internal_enc =
-		      cp_name2id(cfg_get_param(SECTION_OPTIONS, NULL,
-		                               "DefaultInternalEncoding"))))
-			/* Deprecated alternative */
-			pers_opts.internal_enc =
-				cp_name2id(cfg_get_param(SECTION_OPTIONS, NULL,
-				               "DefaultIntermediateEncoding"));
+	    !pers_opts.internal_cp) {
+		if (!(pers_opts.internal_cp =
+			cp_name2id(cfg_get_param(SECTION_OPTIONS, NULL,
+			                         "DefaultInternalCodepage"))))
+			pers_opts.internal_cp =
+			    cp_name2id(cfg_get_param(SECTION_OPTIONS, NULL,
+			                         "DefaultInternalEncoding"));
 	}
 
 	/* Performance opportunity - avoid unneccessary conversions */
-	if (pers_opts.internal_enc && pers_opts.internal_enc != UTF_8 &&
+	if (pers_opts.internal_cp && pers_opts.internal_cp != UTF_8 &&
 	    (!pers_opts.target_enc || pers_opts.target_enc == UTF_8)) {
 		if ((format->params.flags & FMT_UNICODE) &&
 		    (format->params.flags & FMT_UTF8))
-			pers_opts.target_enc = pers_opts.internal_enc;
+			pers_opts.target_enc = pers_opts.internal_cp;
 	}
 
 	initUnicode(UNICODE_UNICODE);
@@ -337,10 +357,19 @@ static int ldr_split_line(char **login, char **ciphertext,
 	fields[1] = *ciphertext = ldr_get_field(&line, db_opts->field_sep_char);
 
 /* Check for NIS stuff */
-	if ((!strcmp(*login, "+") || !strncmp(*login, "+@", 2)) &&
-	    strlen(*ciphertext) < 10 && strncmp(*ciphertext, "$dummy$", 7)
-	    && strncmp(*ciphertext, "$0$", 3))
+	if (((*login)[0] == '+' && (!(*login)[1] || (*login)[1] == '@')) &&
+	    (*ciphertext)[0] != '$' && strnlen(*ciphertext, 10) < 10 &&
+	    strncmp(*ciphertext, "$dummy$", 7)) {
+		if (db_opts->showtypes) {
+			int fs = db_opts->field_sep_char;
+			printf("%s%c%s%c2%c\n",
+			       *login,
+			       fs, *ciphertext,
+			       fs, /* 2, */
+			       fs);
+		}
 		return 0;
+	}
 
 	if (!**ciphertext && !line) {
 /* Possible hash on a line on its own (no colons) */
@@ -353,8 +382,9 @@ static int ldr_split_line(char **login, char **ciphertext,
 		p++;
 /* Some valid dummy or plaintext hashes may be shorter than 10 characters,
  * so don't subject them to the length checks. */
-		if (strncmp(*ciphertext, "$dummy$", 7) &&
-		    strncmp(*ciphertext, "$0$", 3) &&
+		if (((*ciphertext)[0] != '$' ||
+		    (strncmp(*ciphertext, "$dummy$", 7) &&
+		    strncmp(*ciphertext, "$0$", 3))) &&
 		    p - *ciphertext != 10 /* not tripcode */) {
 /* Check for a special case: possibly a traditional crypt(3) hash with
  * whitespace in its invalid salt.  Only support such hashes at the very start
@@ -363,8 +393,17 @@ static int ldr_split_line(char **login, char **ciphertext,
 				(*ciphertext)--;
 			if (p - *ciphertext == 12 && *ciphertext - *login == 1)
 				(*ciphertext)--;
-			if (p - *ciphertext < 13)
+			if (p - *ciphertext < 13) {
+				if (db_opts->showtypes) {
+					int fs = db_opts->field_sep_char;
+					printf("%c%s%c3%c\n",
+					       /* empty, */
+					       fs, *ciphertext,
+					       fs, /* 3, */
+					       fs);
+				}
 				return 0;
+			}
 		}
 		*p = 0;
 		fields[0] = *login = no_username;
@@ -399,9 +438,13 @@ static int ldr_split_line(char **login, char **ciphertext,
 
 	/* /etc/passwd */
 	*uid = fields[2];
-	gid = fields[3];
 	*gecos = fields[4];
 	*home = fields[5];
+
+	if (fields[0] == no_username && !db_opts->showtypes)
+		goto find_format;
+
+	gid = fields[3];
 	shell = fields[6];
 
 	if (SPLFLEN(2) == 32 || SPLFLEN(3) == 32) {
@@ -446,6 +489,133 @@ static int ldr_split_line(char **login, char **ciphertext,
 	if (ldr_check_list(db_opts->groups, gid, gid)) return 0;
 	if (ldr_check_shells(db_opts->shells, shell)) return 0;
 
+	if (db_opts->showtypes) {
+		int fs = db_opts->field_sep_char;
+		/* Flag: the format is not the first valid format. The
+		 * first format should not print the first field
+		 * separator. */
+		int not_first_format = 0;
+		/* \0 and \n are not possible in any field. */
+		/* field_sep_char should not be possible in any field too.
+		 * But it is possible with --field-separator-char=/ due to
+		 * default value "/" for home field. Also ? may come from
+		 * empty login. */
+		/* Flag: no fields contain \n or field separator. */
+		int bad_char = 0;
+#ifndef DYNAMIC_DISABLED
+		int bare_always_valid = 0;
+		if ((options.dynamic_bare_hashes_always_valid == 'Y')
+		    || (options.dynamic_bare_hashes_always_valid != 'N'
+			&& cfg_get_bool(SECTION_OPTIONS, NULL, "DynamicAlwaysUseBareHashes", 1)))
+			bare_always_valid = 1;
+#endif
+		/* We output 1 or 0, so 0 and 1 are bad field separators. */
+		if (fs == '0' || fs == '1')
+			bad_char = 1;
+#define check_field_separator(str) bad_char |= strchr((str), fs) || strchr((str), '\n')
+		/* To suppress warnings, particularly from
+		 * generic crypt's valid() (c3_fmt.c). */
+		ldr_in_pot = 1;
+		/* The format:
+		 * Once for each hash even if it can't be loaded (7 fields):
+		 *   login,
+		 *   ciphertext,
+		 *   uid,
+		 *   gid,
+		 *   gecos,
+		 *   home,
+		 *   shell.
+		 * For each valid format (may be nothing):
+		 *   label,
+		 *   is format disabled? (1/0),
+		 *   is format dynamic? (1/0),
+		 *   does format use the ciphertext field as is? (1/0),
+		 *   canonical hash or hashes (if there are several parts).
+		 * All fields above are separated by field_sep_char.
+		 * Formats are separated by empty field.
+		 * Additionally on the end:
+		 *   separator,
+		 *   line consistency mark (0/1/2/3):
+		 *     0 - the line is consistent and can be parsed easily,
+		 *     1 - field separator char occurs in fields, line can't
+		 *         be parsed easily,
+		 *     2 - the line was skipped as bad NIS stuff, only login
+		 *         and ciphertext are shown,
+		 *     3 - the line was skipped parsing descrypt with
+		 *         invalid salt, only ciphertext is shown (together
+		 *         with empty login); empty lines fall here,
+		 *   separator.
+		 * The additional field_sep_char at the end of line does not
+		 * break numeration of fields but allows parser to get
+		 * field_sep_char from the line.
+		 * A parser have to check the last 3 chars.
+		 * If the format does not use the ciphertext field as is,
+		 * then a parser have to match input line with output line
+		 * by number of line.
+		 */
+		printf("%s%c%s%c%s%c%s%c%s%c%s%c%s",
+		       *login,
+		       fs, *ciphertext,
+		       fs, *uid,
+		       fs, gid,
+		       fs, *gecos,
+		       fs, *home,
+		       fs, shell);
+		check_field_separator(*login);
+		check_field_separator(*ciphertext);
+		check_field_separator(*uid);
+		check_field_separator(gid);
+		check_field_separator(*gecos);
+		check_field_separator(*home);
+		check_field_separator(shell);
+		/* Fields above may be empty. */
+		/* Empty fields are separators after this point. */
+		alt = fmt_list;
+		do {
+			char *prepared;
+			int disabled = 0;
+			int prepared_eq_ciphertext;
+			int valid;
+			int part;
+			int is_dynamic = ((alt->params.flags & FMT_DYNAMIC) == FMT_DYNAMIC);
+/* We enforce DynamicAlwaysUseBareHashes for each format. By default
+ * dynamics do that only if a bare hash occurs on the first line. */
+#ifndef DYNAMIC_DISABLED
+			if (bare_always_valid)
+				dynamic_allow_rawhash_fixup = 1;
+#endif
+			prepared = alt->methods.prepare(fields, alt);
+			if (!prepared)
+				continue;
+			prepared_eq_ciphertext = (*ciphertext == prepared || !strcmp(*ciphertext, prepared));
+			valid = alt->methods.valid(prepared, alt);
+			if (!valid)
+				continue;
+			ldr_set_encoding(alt);
+			/* Empty field between valid formats */
+			if (not_first_format) {
+				printf("%c", fs);
+			}
+			not_first_format = 1;
+			printf("%c%s%c%d%c%d%c%d",
+			       fs, alt->params.label,
+			       fs, disabled,
+			       fs, is_dynamic,
+			       fs, prepared_eq_ciphertext);
+			check_field_separator(alt->params.label);
+			/* Canonical hash or hashes (like halves of LM) */
+			for (part = 0; part < valid; part++) {
+				char *split = alt->methods.split(prepared, part, alt);
+				printf("%c%s", fs, split);
+				check_field_separator(split);
+			}
+		} while ((alt = alt->next));
+		printf("%c%d%c\n", fs, bad_char, fs);
+		return 0;
+#undef check_field_separator
+	}
+
+find_format:
 	if (*format) {
 		char *prepared;
 		int valid;
@@ -458,8 +628,19 @@ static int ldr_split_line(char **login, char **ciphertext,
 
 		if (valid) {
 			*ciphertext = prepared;
+#ifdef HAVE_FUZZ
+			if (options.flags & FLG_FUZZ_CHK) {
+				ldr_set_encoding(*format);
+				fmt_init(*format);
+			}
+#endif
 			return valid;
 		}
+
+#ifdef HAVE_FUZZ
+		if (options.flags & FLG_FUZZ_CHK)
+			return valid;
+#endif
 
 		ldr_set_encoding(*format);
 
@@ -469,16 +650,6 @@ static int ldr_split_line(char **login, char **ciphertext,
 				continue;
 			if (alt->params.flags & FMT_WARNED)
 				continue;
-			/* Format disabled in john.conf */
-			if (cfg_get_bool(SECTION_DISABLED, SUBSECTION_FORMATS,
-			                 alt->params.label, 0)) {
-#ifdef DEBUG
-				if ((alt->params.flags & FMT_DYNAMIC) == FMT_DYNAMIC) {
-					// in debug mode, we 'allow' dyna
-				} else
-#endif
-				continue;
-			}
 #ifdef HAVE_CRYPT
 			if (alt == &fmt_crypt &&
 #ifdef __sun
@@ -513,18 +684,6 @@ static int ldr_split_line(char **login, char **ciphertext,
 	do {
 		char *prepared;
 		int valid;
-
-		/* Format disabled in john.conf, unless forced */
-		if (fmt_list->next &&
-		    cfg_get_bool(SECTION_DISABLED, SUBSECTION_FORMATS,
-		                 alt->params.label, 0)) {
-#ifdef DEBUG
-			if ((alt->params.flags & FMT_DYNAMIC) == FMT_DYNAMIC) {
-				// in debug mode, we 'allow' dyna
-			} else
-#endif
-			continue;
-		}
 
 #ifdef HAVE_CRYPT
 /*
@@ -620,10 +779,10 @@ static struct list_main *ldr_init_words(char *login, char *gecos, char *home)
 
 	list_init(&words);
 
-	if (*login && login != no_username)
+	if (*login && login != no_username && !single_skip_login)
 		list_add(words, ldr_conv(login));
 	ldr_split_string(words, ldr_conv(gecos));
-	if (login != no_username)
+	if (login != no_username && !single_skip_login)
 		ldr_split_string(words, ldr_conv(login));
 	if (pristine_gecos && *gecos)
 		list_add_unique(words, ldr_conv(gecos));
@@ -634,7 +793,11 @@ static struct list_main *ldr_init_words(char *login, char *gecos, char *home)
 	return words;
 }
 
+#ifdef HAVE_FUZZ
+void ldr_load_pw_line(struct db_main *db, char *line)
+#else
 static void ldr_load_pw_line(struct db_main *db, char *line)
+#endif
 {
 	static int skip_dupe_checking = 0;
 	struct fmt_main *format;
@@ -646,13 +809,21 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 	struct db_salt *current_salt, *last_salt;
 	struct db_password *current_pw, *last_pw;
 	struct list_main *words;
-	size_t pw_size, salt_size;
-#if FMT_MAIN_VERSION > 11
+	size_t pw_size;
 	int i;
-#endif
 
+#ifdef HAVE_FUZZ
+	char *line_sb;
+
+	line_sb = line;
+	if (options.flags & FLG_FUZZ_CHK)
+		line_sb = skip_bom(line);
+	count = ldr_split_line(&login, &ciphertext, &gecos, &home, &uid,
+		NULL, &db->format, db->options, line_sb);
+#else
 	count = ldr_split_line(&login, &ciphertext, &gecos, &home, &uid,
 		NULL, &db->format, db->options, line);
+#endif
 	if (count <= 0) return;
 	if (count >= 2) db->options->flags |= DB_SPLIT;
 
@@ -660,20 +831,6 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 	dyna_salt_init(format);
 
 	words = NULL;
-
-	if (db->options->flags & DB_WORDS) {
-		pw_size = sizeof(struct db_password);
-		salt_size = sizeof(struct db_salt);
-	} else {
-		if (db->options->flags & DB_LOGIN)
-			pw_size = sizeof(struct db_password) -
-				sizeof(struct list_main *);
-		else
-			pw_size = sizeof(struct db_password) -
-				(sizeof(char *) + sizeof(struct list_main *));
-		salt_size = sizeof(struct db_salt) -
-			sizeof(struct db_keys *);
-	}
 
 	if (!db->password_hash) {
 		ldr_init_password_hash(db);
@@ -705,7 +862,7 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 				        " \"%.*s\" (%s)\n",
 				        format->params.binary_size,
 				        (char*)binary, piece);
-				break;
+				continue;
 			}
 		}
 
@@ -760,17 +917,15 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 		if (!current_salt) {
 			last_salt = db->salt_hash[salt_hash];
 			current_salt = db->salt_hash[salt_hash] =
-				mem_alloc_tiny(salt_size, MEM_ALIGN_WORD);
+				mem_alloc_tiny(db->salt_size, MEM_ALIGN_WORD);
 			current_salt->next = last_salt;
 
 			current_salt->salt = mem_alloc_copy(salt,
 				format->params.salt_size,
 				format->params.salt_align);
 
-#if FMT_MAIN_VERSION > 11
 			for (i = 0; i < FMT_TUNABLE_COSTS && format->methods.tunable_cost_value[i] != NULL; ++i)
 				current_salt->cost[i] = format->methods.tunable_cost_value[i](current_salt->salt);
-#endif
 
 			current_salt->index = fmt_dummy_hash;
 			current_salt->bitmap = NULL;
@@ -790,6 +945,13 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 		current_salt->count++;
 		db->password_count++;
 
+/* If we're not allocating memory for the "login" field, we may as well not
+ * allocate it for the "source" field if the format doesn't need it. */
+		pw_size = db->pw_size;
+		if (!(db->options->flags & DB_LOGIN) &&
+		    format->methods.source != fmt_default_source)
+			pw_size -= sizeof(char *);
+
 		last_pw = current_salt->list;
 		current_pw = current_salt->list = mem_alloc_tiny(
 			pw_size, MEM_ALIGN_WORD);
@@ -799,9 +961,11 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 		db->password_hash[pw_hash] = current_pw;
 		current_pw->next_hash = last_pw;
 
-/* If we're not going to use the source field for its usual purpose, see if we
- * can pack the binary value in it. */
-		if (format->methods.source != fmt_default_source &&
+/* If we're not going to use the source field for its usual purpose yet we had
+ * to allocate memory for it (because we need at least one field after it), see
+ * if we can pack the binary value in it. */
+		if ((db->options->flags & DB_LOGIN) &&
+		    format->methods.source != fmt_default_source &&
 		    sizeof(current_pw->source) >= format->params.binary_size)
 			current_pw->binary = memcpy(&current_pw->source,
 				binary, format->params.binary_size);
@@ -823,23 +987,22 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 			if (login != no_username && index == 0)
 				login = ldr_conv(login);
 
-			current_pw->uid = "";
+			if (options.show_uid_in_cracks)
+				current_pw->uid = str_alloc_copy(uid);
+
 			if (count >= 2 && count <= 9) {
 				current_pw->login = mem_alloc_tiny(
 					strlen(login) + 3, MEM_ALIGN_NONE);
 				sprintf(current_pw->login, "%s:%d",
 					login, index + 1);
-				current_pw->uid = str_alloc_copy(uid);
 			} else
 			if (login == no_username)
 				current_pw->login = login;
 			else
 			if (words && *login)
 				current_pw->login = words->head->data;
-			else {
+			else
 				current_pw->login = str_alloc_copy(login);
-				current_pw->uid = str_alloc_copy(uid);
-			}
 		}
 	}
 }
@@ -848,6 +1011,8 @@ void ldr_load_pw_file(struct db_main *db, char *name)
 {
 	pristine_gecos = cfg_get_bool(SECTION_OPTIONS, NULL,
 	        "PristineGecos", 0);
+	single_skip_login = cfg_get_bool(SECTION_OPTIONS, NULL,
+	        "SingleSkipLogin", 0);
 
 	read_file(db, name, RF_ALLOW_DIR, ldr_load_pw_line);
 }
@@ -858,6 +1023,7 @@ static void ldr_load_pot_line(struct db_main *db, char *line)
 	char *ciphertext;
 	void *binary;
 	int hash;
+	int need_removal;
 	struct db_password *current;
 
 	ciphertext = ldr_get_field(&line, db->options->field_sep_char);
@@ -865,6 +1031,7 @@ static void ldr_load_pot_line(struct db_main *db, char *line)
 	ciphertext = format->methods.split(ciphertext, 0, format);
 	binary = format->methods.binary(ciphertext);
 	hash = db->password_hash_func(binary);
+	need_removal = 0;
 
 	if ((current = db->password_hash[hash]))
 	do {
@@ -879,19 +1046,19 @@ static void ldr_load_pot_line(struct db_main *db, char *line)
 		    format->methods.source(current->source, current->binary)))
 			continue;
 		current->binary = NULL; /* mark for removal */
+		need_removal = 1;
 	} while ((current = current->next_hash));
+
+	if (need_removal)
+		db->options->flags |= DB_NEED_REMOVAL;
 }
 
 void ldr_load_pot_file(struct db_main *db, char *name)
 {
 	if (db->format && !(db->format->params.flags & FMT_NOT_EXACT)) {
-#ifdef HAVE_CRYPT
 		ldr_in_pot = 1;
-#endif
 		read_file(db, name, RF_ALLOW_MISSING, ldr_load_pot_line);
-#ifdef HAVE_CRYPT
 		ldr_in_pot = 0;
-#endif
 	}
 }
 
@@ -914,7 +1081,7 @@ static void ldr_init_salts(struct db_main *db)
 		*tail = current;
 		ctr = 0;
 		do {
-			current -> sequential_id = ctr++;
+			ctr++;
 			tail = &current->next;
 		} while ((current = current->next));
 #ifdef DEBUG_HASH
@@ -922,6 +1089,18 @@ static void ldr_init_salts(struct db_main *db)
 			printf("salt hash %08x, %d salts\n", hash, ctr);
 #endif
 	}
+}
+
+/* Compute sequential_id. */
+static void ldr_init_sqid(struct db_main *db)
+{
+	struct db_salt *current;
+	int ctr = 0;
+
+	if ((current = db->salts))
+	do {
+		current->sequential_id = ctr++;
+	} while ((current = current->next));
 }
 
 /* #define DEBUG_SALT_SORT */
@@ -986,26 +1165,27 @@ static int ldr_salt_cmp_num(const void *x, const void *y) {
 }
 
 /*
- * If there are more than 1 salt, AND the format exports a salt_compare
- * function, then we reorder the salt array, into the order the format
- * wants them in.  Reasons for this, are usually that the format can
- * gain a lot of speed, if some of the salts are grouped together, so
- * that the group is run one after the other.  This was first done for
- * the WPAPSK format, so that the format could group all ESSID's in
- * the salts, so that the PBKDF2 is computed once (for the first
- * instance of the ESSID), then all of the other salts which are
- * different salts, but  * which have the exact same ESSID will not
- * have to perform the very costly PBKDF2.  The format is designed
- * to work that way, IFF the salts come to it in the right order.
- * This function gets them into that order.
- * A later bug was found in dynamic (hopefully not in other formats
- * also), where some formats, like md5(md5($p).$s) would fail, if
- * there were salt of varying length, within the same input file.
- * the longer salts would leave stale data, which would cause
- * subsquent shorter salt values to produce wrong hash. But if
- * we sort the salts based on salt string length, this issue
- * goes away, and things work properly.  This function now handles
- * the dynamic type also, to correct this performance design choice.
+ * If there are more than 1 salt AND the format exports a salt_compare
+ * function, then we reorder the salt array into the order the format
+ * wants them in.  The rationale is usually that the format can
+ * gain speed if some of the salts are grouped together.  This was first
+ * done for the WPAPSK format so that the format could group all ESSID's
+ * in the salts. So the PBKDF2 is computed once (for the first instance
+ * of the ESSID), then all of the other salts which are different but
+ * have the same ESSID will not have to perform the very costly PBKDF2.
+ * The format is designed to work that way, IF the salts come to it in
+ * the right order.
+ *
+ * Later, a bug was found in dynamic (hopefully not in other formats)
+ * where formats like md5(md5($p).$s) would fail if there were salts of
+ * varying length within the same input file. The longer salts would
+ * leave stale data. If we sort the salts based on salt string length,
+ * this issue goes away with no performance overhead.  So this function
+ * is now also used for dynamic.
+ *
+ * There's also an experimental john.conf setting AlwaysSortSalts that,
+ * if true, will fallback to sort "most used first" if the format does
+ * not have a salt_compare method defined.
  */
 static void ldr_sort_salts(struct db_main *db)
 {
@@ -1016,7 +1196,11 @@ static void ldr_sort_salts(struct db_main *db)
 #else
 	salt_cmp_t ar[100];  /* array is easier to debug in VC */
 #endif
-	if (db->salt_count < 2)
+	int always;
+
+	always = cfg_get_bool(SECTION_OPTIONS, NULL, "AlwaysSortSalts", 1);
+
+	if (db->salt_count < 2 || (!fmt_salt_compare && !always))
 		return;
 
 	log_event("Sorting salts, for performance");
@@ -1052,7 +1236,7 @@ static void ldr_sort_salts(struct db_main *db)
 	/* finally, we re-build the linked list of salts */
 	db->salts = ar[0].p;
 	s = db->salts;
-	for (i = 1; i < db->salt_count; ++i) {
+	for (i = 1; i <= db->salt_count; ++i) {
 		/* Rebuild salt hash table, if we still had one */
 		if (db->salt_hash) {
 			int hash;
@@ -1061,8 +1245,10 @@ static void ldr_sort_salts(struct db_main *db)
 			if (!db->salt_hash[hash])
 				db->salt_hash[hash] = s;
 		}
-		s->next = ar[i].p;
-		s = s->next;
+		if (i < db->salt_count) {
+			s->next = ar[i].p;
+			s = s->next;
+		}
 	}
 	s->next = 0;
 
@@ -1084,6 +1270,7 @@ static void ldr_show_left(struct db_main *db, struct db_password *pw)
 	char uid_sep[2] = { 0 };
 	char *uid_out = "";
 	char *pw_source = db->format->methods.source(pw->source, pw->binary);
+	char *login = (db->options->flags & DB_LOGIN) ? pw->login : "?";
 
 #ifndef DYNAMIC_DISABLED
 	/* Note for salted dynamic, we 'may' need to fix up the salts to
@@ -1091,7 +1278,7 @@ static void ldr_show_left(struct db_main *db, struct db_password *pw)
 	if (!strncmp(pw_source, "$dynamic_", 9))
 		pw_source = dynamic_FIX_SALT_TO_HEX(pw_source);
 #endif
-	if (options.show_uid_on_crack && pw->uid && *pw->uid) {
+	if (options.show_uid_in_cracks && pw->uid && *pw->uid) {
 		uid_sep[0] = db->options->field_sep_char;
 		uid_out = pw->uid;
 	}
@@ -1099,12 +1286,12 @@ static void ldr_show_left(struct db_main *db, struct db_password *pw)
 	{
 		char utf8login[PLAINTEXT_BUFFER_SIZE + 1];
 
-		cp_to_utf8_r(pw->login, utf8login,
+		cp_to_utf8_r(login, utf8login,
 		             PLAINTEXT_BUFFER_SIZE);
 		printf("%s%c%s%s%s\n", utf8login, db->options->field_sep_char,
 		       pw_source, uid_sep, uid_out);
 	} else
-		printf("%s%c%s%s%s\n", pw->login, db->options->field_sep_char,
+		printf("%s%c%s%s%s\n", login, db->options->field_sep_char,
 		       pw_source, uid_sep, uid_out);
 }
 
@@ -1116,6 +1303,9 @@ static void ldr_remove_marked(struct db_main *db)
 {
 	struct db_salt *current_salt, *last_salt;
 	struct db_password *current_pw, *last_pw;
+
+	if (!(db->options->flags & DB_NEED_REMOVAL))
+		return;
 
 	last_salt = NULL;
 	if ((current_salt = db->salts))
@@ -1148,6 +1338,8 @@ static void ldr_remove_marked(struct db_main *db)
 		} else
 			last_salt = current_salt;
 	} while ((current_salt = current_salt->next));
+
+	db->options->flags &= ~DB_NEED_REMOVAL;
 }
 
 /*
@@ -1181,7 +1373,6 @@ static void ldr_filter_salts(struct db_main *db)
 	} while ((current = current->next));
 }
 
-#if FMT_MAIN_VERSION > 11
 /*
  * check if cost values for a particular salt match
  * what has been requested with the --costs= option
@@ -1221,7 +1412,6 @@ static void ldr_filter_costs(struct db_main *db)
 			last = current;
 	} while ((current = current->next));
 }
-#endif
 
 /*
  * Allocate memory for and initialize the hash table for this salt if needed.
@@ -1231,7 +1421,7 @@ static void ldr_init_hash_for_salt(struct db_main *db, struct db_salt *salt)
 {
 	struct db_password *current;
 	int (*hash_func)(void *binary);
-	int bitmap_size, hash_size;
+	size_t bitmap_size, hash_size;
 	int hash;
 
 	if (salt->hash_size < 0) {
@@ -1333,7 +1523,6 @@ static void ldr_init_hash(struct db_main *db)
 	} while ((current = current->next));
 }
 
-#if FMT_MAIN_VERSION > 11
 /*
  * compute cost ranges after all unneeded salts have been removed
  */
@@ -1357,7 +1546,6 @@ static void ldr_cost_ranges(struct db_main *db)
 		}
 	} while ((current = current->next));
 }
-#endif
 
 void ldr_fix_database(struct db_main *db)
 {
@@ -1371,16 +1559,14 @@ void ldr_fix_database(struct db_main *db)
 		MEM_FREE(db->salt_hash);
 
 	ldr_filter_salts(db);
-#if FMT_MAIN_VERSION > 11
 	ldr_filter_costs(db);
-#endif
 	ldr_remove_marked(db);
-#if FMT_MAIN_VERSION > 11
 	ldr_cost_ranges(db);
-#endif
 	ldr_sort_salts(db);
 
 	ldr_init_hash(db);
+
+	ldr_init_sqid(db);
 
 	db->loaded = 1;
 
@@ -1396,21 +1582,52 @@ void ldr_fix_database(struct db_main *db)
 
 static int ldr_cracked_hash(char *ciphertext)
 {
-	unsigned int hash = 0;
-	char *p = ciphertext;
+	unsigned int hash, extra;
+	unsigned char *p = (unsigned char *)ciphertext;
 
+	hash = p[0] | 0x20; /* ASCII case insensitive */
+	if (!hash)
+		goto out;
+	extra = p[1] | 0x20;
+	if (!extra)
+#if CRACKED_HASH_SIZE >= 0x100
+		goto out;
+#else
+		goto out_and;
+#endif
+
+	p += 2;
 	while (*p) {
-		hash <<= 1;
-		hash += (unsigned char)*p++ | 0x20; /* ASCII case insensitive */
-		if (hash >> (2 * CRACKED_HASH_LOG - 1)) {
+		hash <<= 1; extra <<= 1;
+		hash += p[0] | 0x20;
+		if (!p[1]) break;
+		extra += p[1] | 0x20;
+		p += 2;
+		if (hash & 0xe0000000) {
 			hash ^= hash >> CRACKED_HASH_LOG;
+			extra ^= extra >> (CRACKED_HASH_LOG - 1);
 			hash &= CRACKED_HASH_SIZE - 1;
 		}
 	}
 
+	hash -= extra;
+	hash ^= extra << (CRACKED_HASH_LOG / 2);
+
 	hash ^= hash >> CRACKED_HASH_LOG;
+
+#if CRACKED_HASH_LOG <= 15
+	hash ^= hash >> (2 * CRACKED_HASH_LOG);
+#endif
+#if CRACKED_HASH_LOG <= 10
+	hash ^= hash >> (3 * CRACKED_HASH_LOG);
+#endif
+
+#if CRACKED_HASH_SIZE < 0x100
+out_and:
+#endif
 	hash &= CRACKED_HASH_SIZE - 1;
 
+out:
 	return hash;
 }
 
@@ -1423,13 +1640,17 @@ static void ldr_show_pot_line(struct db_main *db, char *line)
 	ciphertext = ldr_get_field(&line, db->options->field_sep_char);
 
 	if (options.format &&
-	    !strcasecmp(options.format, "raw-sha1-linkedin") &&
-	    !strncmp(ciphertext, "$dynamic_26$", 12) &&
-	    strncmp(ciphertext, "$dynamic_26$00000", 17)) {
-		char *new = mem_alloc_tiny(12 + 41, MEM_ALIGN_NONE);
-		strnzcpy(new, ciphertext, 12 + 41);
-		memset(new + 12, '0', 5);
-		ciphertext = new;
+	    !strcasecmp(options.format, "raw-sha1-linkedin")) {
+		if (!strncmp(ciphertext, "$dynamic_26$", 12))
+			memset(ciphertext + 12, '0', 5);
+		else if (!strncmp(ciphertext, "{SHA}", 5)) {
+			char out[41+3];
+			base64_convert(ciphertext + 5, e_b64_mime,
+			    strlen(ciphertext) - 5, out, e_b64_hex, 41, 0);
+			memcpy(out, "00000", 5);
+			base64_convert(out, e_b64_hex, 40, ciphertext + 5,
+			    e_b64_mime, strlen(out), flg_Base64_MIME_TRAIL_EQ);
+		}
 	}
 #ifndef DYNAMIC_DISABLED
 	else
@@ -1479,19 +1700,16 @@ static void ldr_show_pot_line(struct db_main *db, char *line)
 
 void ldr_show_pot_file(struct db_main *db, char *name)
 {
-#ifdef HAVE_CRYPT
 	ldr_in_pot = 1;
-#endif
 	read_file(db, name, RF_ALLOW_MISSING, ldr_show_pot_line);
-#ifdef HAVE_CRYPT
 	ldr_in_pot = 0;
-#endif
 }
 
 static void ldr_show_pw_line(struct db_main *db, char *line)
 {
 	int show, loop;
 	char source[LINE_BUFFER_SIZE];
+	char orig_line[LINE_BUFFER_SIZE];
 	struct fmt_main *format;
 	char *(*split)(char *ciphertext, int index, struct fmt_main *self);
 	int index, count, unify;
@@ -1504,14 +1722,27 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 	char utf8source[LINE_BUFFER_SIZE + 1];
 	char joined[PLAINTEXT_BUFFER_SIZE + 1] = "";
 
+	if (db->options->showinvalid)
+		strnzcpy(orig_line, line, sizeof(orig_line));
 	format = NULL;
 	count = ldr_split_line(&login, &ciphertext, &gecos, &home, &uid,
 		source, &format, db->options, line);
 	if (!count) return;
 
+/* If we are just showing the invalid, then simply run that logic */
+	if (db->options->showinvalid) {
+		if (count == -1) {
+			db->password_count++;
+			printf ("%s", orig_line);
+		} else
+			db->guess_count += count;
+		return;
+	}
+
 /* If just one format was forced on the command line, insist on it */
 	if (!fmt_list->next && !format) return;
 
+/* DB_PLAINTEXTS is set when we --make-charset rather than --show */
 	show = !(db->options->flags & DB_PLAINTEXTS);
 
 	if ((loop = (options.flags & FLG_LOOPBACK_CHK) ? 1 : 0))
@@ -1520,12 +1751,20 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 	if (format) {
 		split = format->methods.split;
 		unify = format->params.flags & FMT_SPLIT_UNIFIES_CASE;
-		if (format->params.flags & FMT_UNICODE)
-			pers_opts.store_utf8 = cfg_get_bool(SECTION_OPTIONS,
-			    NULL, "UnicodeStoreUTF8", 0);
-		else
-			pers_opts.store_utf8 = cfg_get_bool(SECTION_OPTIONS,
-			    NULL, "CPstoreUTF8", 0);
+		if (format->params.flags & FMT_UNICODE) {
+			static int setting = -1;
+			if (setting < 0)
+				setting = cfg_get_bool(SECTION_OPTIONS, NULL,
+				    "UnicodeStoreUTF8", 0);
+			pers_opts.store_utf8 = setting;
+		} else {
+			static int setting = -1;
+			if (setting < 0)
+				setting = pers_opts.target_enc != ASCII &&
+				    cfg_get_bool(SECTION_OPTIONS, NULL,
+				    "CPstoreUTF8", 0);
+			pers_opts.store_utf8 = setting;
+		}
 	} else {
 		split = fmt_default_split;
 		count = 1;

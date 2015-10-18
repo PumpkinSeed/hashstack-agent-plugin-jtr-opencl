@@ -25,7 +25,6 @@ john_register_one(&fmt_blackberry1);
 #include "arch.h"
 
 //#undef _OPENMP
-//#undef SIMD_COEF_32
 //#undef SIMD_COEF_64
 //#undef SIMD_PARA_SHA512
 
@@ -35,7 +34,7 @@ john_register_one(&fmt_blackberry1);
 #include "params.h"
 #include "options.h"
 #include "johnswap.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -45,15 +44,17 @@ john_register_one(&fmt_blackberry1);
 // 128 - 82016  -test=0 is still almost instant.
 // 256 - 81753
 // 512 - 80537
+#ifndef OMP_SCALE
 #define OMP_SCALE		128
+#endif
 #endif
 #include "memdbg.h"
 
 #define FORMAT_TAG 		"$bbes10$"
 #define FORMAT_TAG_LENGTH	8
-#define FORMAT_LABEL 		"blackberry-es10"
+#define FORMAT_LABEL 		"Blackberry-ES10"
 #define FORMAT_NAME 		""
-#define ALGORITHM_NAME 		"SHA-256 " SHA256_ALGORITHM_NAME
+#define ALGORITHM_NAME 		"SHA-512 " SHA512_ALGORITHM_NAME
 
 #define BENCHMARK_COMMENT	" (101x)"
 #define BENCHMARK_LENGTH	-1
@@ -63,14 +64,18 @@ john_register_one(&fmt_blackberry1);
 #define MAX_SALT_SIZE		64
 #define SALT_SIZE		sizeof(struct custom_salt)
 #define SALT_ALIGN		4
-#define MIN_KEYS_PER_CRYPT	1
 #ifdef SIMD_COEF_64
-#define MAX_KEYS_PER_CRYPT	SIMD_COEF_64
+#define MIN_KEYS_PER_CRYPT	(SIMD_COEF_64*SIMD_PARA_SHA512)
+#define MAX_KEYS_PER_CRYPT	(SIMD_COEF_64*SIMD_PARA_SHA512)
 #else
+#define MIN_KEYS_PER_CRYPT	1
 #define MAX_KEYS_PER_CRYPT	1
 #endif
 static struct fmt_tests blackberry_tests[] = {
 	{"$bbes10$76BDF6BE760FCF5DEE7B20E27632D1FEDD9D64E1BBCC941F42957E87CBFB96F176324B2E2C71976CEBE67CA6F400F33F001D7453D80F4AF5D80C8A93ED0BA0E6$DB1C19C0", "toulouse"},
+	{"$bbes10$57ECCAA65BB087E3E506A8C5CEBEE193DD051538CE44F4156D65F1B44E0266DF49337EA11812DF12E39C8B12EB46F19C291FD9529CD4F09B3C8109BE6F4861E5$0wzWUnuQ", "test"},
+	{"$bbes10$217A6A0646ACF599B5A05A3D2B47F96B576353C74E4D28E857A476EFDFB36B27930FEDAA8064FFD17F36C7C854BED49FF95029B3310434BB2D05524043AE6E44$A5Dr4lXa", "ripper"},
+	{"$bbes10$DE1A954989FFED2D74900463A1AD7B14D852164D84AA0443F0EC59A0875A911C92CEF73E7C082B13864132644FA49DFEBDCF1D2DA0C9711CD4DC348A855F7285$MnphRIkf", "superbadPass"},
 	{NULL}
 };
 
@@ -170,13 +175,13 @@ static void *get_binary(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static void set_salt(void *salt)
 {
@@ -197,9 +202,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		SHA512_CTX ctx;
 #ifdef SIMD_COEF_64
 		unsigned int i;
-		unsigned char _IBuf[128*MAX_KEYS_PER_CRYPT+MEM_ALIGN_SIMD], *keys, tmpBuf[128];
+		unsigned char _IBuf[128*MAX_KEYS_PER_CRYPT+MEM_ALIGN_CACHE],
+		              *keys, tmpBuf[128];
 		ARCH_WORD_64 *keys64, *tmpBuf64=(ARCH_WORD_64*)tmpBuf, *p64;
-		keys = (unsigned char*)mem_align(_IBuf, MEM_ALIGN_SIMD);
+		keys = (unsigned char*)mem_align(_IBuf, MEM_ALIGN_CACHE);
 		keys64 = (ARCH_WORD_64*)keys;
 		memset(keys, 0, 128*MAX_KEYS_PER_CRYPT);
 
@@ -208,23 +214,16 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 			SHA512_Update(&ctx, saved_key[index+i], strlen(saved_key[index+i]));
 			SHA512_Update(&ctx, cur_salt->salt, strlen((char*)cur_salt->salt));
 			SHA512_Final(tmpBuf, &ctx);
-			p64 = &keys64[i];
+			p64 = &keys64[i%SIMD_COEF_64+i/SIMD_COEF_64*SHA_BUF_SIZ*SIMD_COEF_64];
 			for (j = 0; j < 8; ++j)
 				p64[j*SIMD_COEF_64] = JOHNSWAP64(tmpBuf64[j]);
 			p64[8*SIMD_COEF_64] = 0x8000000000000000ULL;
 			p64[15*SIMD_COEF_64] = 0x200;
 		}
-		for (j = 0; j < 99; j++)
-			SSESHA512body(keys, keys64, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
-		// now marshal into crypt_out;
-		for (i = 0; i < MAX_KEYS_PER_CRYPT; ++i) {
-			ARCH_WORD_64 *Optr64 = (ARCH_WORD_64*)(crypt_out[index+i]);
-			ARCH_WORD_64 *Iptr64 = &keys64[((i/SIMD_COEF_64)*(SIMD_COEF_64*16)) + (i&(SIMD_COEF_64-1))];
-			for (j = 0; j < 8; ++j) {
-				Optr64[j] = JOHNSWAP64(*Iptr64);
-				Iptr64 += SIMD_COEF_64;
-			}
-		}
+		for (j = 0; j < 98; j++)
+			SIMDSHA512body(keys, keys64, NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT);
+		// Last one with FLAT_OUT
+		SIMDSHA512body(keys, (ARCH_WORD_64*)crypt_out[index], NULL, SSEi_MIXED_IN|SSEi_OUTPUT_AS_INP_FMT|SSEi_FLAT_OUT);
 #else
 		SHA512_Init(&ctx);
 		SHA512_Update(&ctx, saved_key[index], strlen(saved_key[index]));
@@ -248,7 +247,7 @@ static int cmp_all(void *binary, int count)
 {
 	int index = 0;
 	for (; index < count; index++)
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -293,9 +292,7 @@ struct fmt_main fmt_blackberry1 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		blackberry_tests
 	}, {
 		init,
@@ -306,9 +303,7 @@ struct fmt_main fmt_blackberry1 = {
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

@@ -1,4 +1,4 @@
-/* 
+/*
  * Office 2007-2013 cracker patch for JtR, common code. 2014 by JimF
  * This file takes replicated but common code, shared between the CPU
  * office format, and the GPU office formats, and places it into one
@@ -27,9 +27,7 @@ int ms_office_common_valid_2010(char *ciphertext, struct fmt_main *self);
 int ms_office_common_valid_2013(char *ciphertext, struct fmt_main *self);
 
 /* other 'common' functions for MSOffice */
-#if FMT_MAIN_VERSION > 11
 unsigned int ms_office_common_iteration_count(void *salt);
-#endif
 void ms_office_common_DecryptUsingSymmetricKeyAlgorithm(ms_office_custom_salt *cur_salt, unsigned char *verifierInputKey, unsigned char *encryptedVerifier, const unsigned char *decryptedVerifier, int length);
 int ms_office_common_PasswordVerifier(ms_office_custom_salt *cur_salt, unsigned char *key, ARCH_WORD_32 *out);
 

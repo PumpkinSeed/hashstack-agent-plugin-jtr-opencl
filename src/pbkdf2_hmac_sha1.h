@@ -27,7 +27,7 @@
 #include <string.h>
 #include "sha.h"
 #include "stdint.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 
 #ifdef PBKDF1_LOGIC
 #define pbkdf2_sha1 pbkdf1_sha1
@@ -93,6 +93,9 @@ static void _pbkdf2_sha1(const unsigned char *S, int SL, int R, ARCH_WORD_32 *ou
 		SHA1_Update(&ctx, tmp_hash, SHA_DIGEST_LENGTH);
 		SHA1_Final(tmp_hash, &ctx);
 #if !defined (PBKDF1_LOGIC)
+#ifdef __MIC__
+#pragma novector
+#endif
 		for(j = 0; j < SHA_DIGEST_LENGTH/sizeof(ARCH_WORD_32); j++) {
 			out[j] ^= ((ARCH_WORD_32*)tmp_hash)[j];
 #if defined (EFS_CRAP_LOGIC)
@@ -138,7 +141,7 @@ static void pbkdf2_sha1(const unsigned char *K, int KL, const unsigned char *S, 
 
 #if defined(SIMD_COEF_32) && !defined(OPENCL_FORMAT)
 
-#define SSE_GROUP_SZ_SHA1 (SIMD_COEF_32*SHA1_SSE_PARA)
+#define SSE_GROUP_SZ_SHA1 (SIMD_COEF_32*SIMD_PARA_SHA1)
 
 
 static void _pbkdf2_sha1_sse_load_hmac(const unsigned char *K[SSE_GROUP_SZ_SHA1], int KL[SSE_GROUP_SZ_SHA1], SHA_CTX pIpad[SSE_GROUP_SZ_SHA1], SHA_CTX pOpad[SSE_GROUP_SZ_SHA1])
@@ -259,8 +262,8 @@ static void pbkdf2_sha1_sse(const unsigned char *K[SSE_GROUP_SZ_SHA1], int KL[SS
 
 		// Here is the inner loop.  We loop from 1 to count.  iteration 0 was done in the ipad/opad computation.
 		for(i = 1; i < R; i++) {
-			SSESHA1body((unsigned char*)o1,o1,i1, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
-			SSESHA1body((unsigned char*)o1,o1,i2, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
+			SIMDSHA1body((unsigned char*)o1,o1,i1, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
+			SIMDSHA1body((unsigned char*)o1,o1,i2, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
 #if !defined (PBKDF1_LOGIC)
 			for (k = 0; k < SSE_GROUP_SZ_SHA1; k++) {
 				unsigned *p = &o1[(k/SIMD_COEF_32)*SIMD_COEF_32*SHA_BUF_SIZ + (k&(SIMD_COEF_32-1))];

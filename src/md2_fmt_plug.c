@@ -36,8 +36,14 @@ static int omp_t = 1;
 // 4k  - 670k
 // 8k  - 680k
 // 16k - 650k
+#ifndef OMP_SCALE
+#ifdef __MIC__
+#define OMP_SCALE  32
+#else
 #define OMP_SCALE  (1024)
-#endif
+#endif // __MIC__
+#endif // OMP_SCALE
+#endif // _OPENMP
 #include "memdbg.h"
 
 #define FORMAT_LABEL		"MD2"
@@ -93,11 +99,8 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 	if (!strncmp(p, FORMAT_TAG, TAG_LENGTH))
 		p += TAG_LENGTH;
-	if (strlen(p) != 32)
+	if (hexlenl(p) != 32)
 		return 0;
-	while(*p)
-		if(atoi16[ARCH_INDEX(*p++)]==0x7f)
-			return 0;
 
 	return 1;
 }
@@ -126,13 +129,13 @@ static void *get_binary(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
@@ -159,7 +162,7 @@ static int cmp_all(void *binary, int count)
 #ifdef _OPENMP
 	for (; index < count; index++)
 #endif
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -219,9 +222,7 @@ struct fmt_main fmt_md2_ = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		md2__tests
 	}, {
 		init,
@@ -232,9 +233,7 @@ struct fmt_main fmt_md2_ = {
 		fmt_default_split,
 		get_binary,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

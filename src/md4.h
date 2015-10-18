@@ -15,24 +15,22 @@
 #elif !defined(_MD4_H)
 #define _MD4_H
 
-#ifndef USING_ICC_S_FILE
 #define MD4_Init john_MD4_Init
 #define MD4_Update john_MD4_Update
 #define MD4_Final john_MD4_Final
-#endif
 
 /* Any 32-bit or wider unsigned integer data type will do */
 typedef unsigned int MD4_u32plus;
 
 typedef struct {
+	MD4_u32plus A, B, C, D;
 	MD4_u32plus lo, hi;
-	MD4_u32plus a, b, c, d;
 	unsigned char buffer[64];
 	MD4_u32plus block[16];
 } MD4_CTX;
 
 extern void MD4_Init(MD4_CTX *ctx);
-extern void MD4_Update(MD4_CTX *ctx, void *data, unsigned long size);
+extern void MD4_Update(MD4_CTX *ctx, const void *data, unsigned long size);
 extern void MD4_Final(unsigned char *result, MD4_CTX *ctx);
 
 #endif

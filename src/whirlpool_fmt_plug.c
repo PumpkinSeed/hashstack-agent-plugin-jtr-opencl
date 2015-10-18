@@ -35,7 +35,9 @@ john_register_one(&fmt_whirlpool);
 #ifdef _OPENMP
 static int omp_t = 1;
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               256
+#endif
 #endif
 #include "memdbg.h"
 
@@ -107,9 +109,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 	if (!strncmp(p, FORMAT_TAG, TAG_LENGTH))
 		p += TAG_LENGTH;
-	if (strlen(p) != CIPHERTEXT_LENGTH)
-		return 0;
-	if (!ishex(p))
+	if (hexlen(p) != CIPHERTEXT_LENGTH)
 		return 0;
 
 	return 1;
@@ -152,13 +152,13 @@ static void *get_binary(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static int crypt_0(int *pcount, struct db_salt *salt)
 {
@@ -232,7 +232,7 @@ static int cmp_all(void *binary, int count)
 #ifdef _OPENMP
 	for (; index < count; index++)
 #endif
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -276,11 +276,10 @@ struct fmt_main fmt_whirlpool_0 = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_SPLIT_UNIFIES_CASE,
-#if FMT_MAIN_VERSION > 11
+		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_OMP_BAD |
+		FMT_SPLIT_UNIFIES_CASE,
 		{ NULL
 		},
-#endif
 		whirlpool_0_tests
 	}, {
 		init,
@@ -291,10 +290,8 @@ struct fmt_main fmt_whirlpool_0 = {
 		split,
 		get_binary,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,
@@ -343,11 +340,10 @@ struct fmt_main fmt_whirlpool_1 = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_SPLIT_UNIFIES_CASE,
-#if FMT_MAIN_VERSION > 11
+		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_OMP_BAD |
+		FMT_SPLIT_UNIFIES_CASE,
 		{ NULL
 		},
-#endif
 		whirlpool_1_tests
 	}, {
 		init,
@@ -358,10 +354,8 @@ struct fmt_main fmt_whirlpool_1 = {
 		split,
 		get_binary,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,
@@ -409,10 +403,9 @@ struct fmt_main fmt_whirlpool = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_SPLIT_UNIFIES_CASE,
-#if FMT_MAIN_VERSION > 11
+		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_OMP_BAD |
+		FMT_SPLIT_UNIFIES_CASE,
 		{ NULL },
-#endif
 		whirlpool_tests
 	}, {
 		init,
@@ -423,9 +416,7 @@ struct fmt_main fmt_whirlpool = {
 		split,
 		get_binary,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

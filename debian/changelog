@@ -1,3 +1,15 @@
+hashstack-agent-plugin-jtr-opencl (1.8.0.6-jumbo-1-bleeding-0sagitta1) precise; urgency=low
+
+  * Partial upgrade to 1.8.0.6-jumbo1 (Latest commit df9497)
+
+ -- Jeremi Gosney <jgosney@sagitta.pw>  Sun, 18 Oct 2015 05:05:50 -0700
+
+hashstack-agent-plugin-jtr-opencl (1.8.0.4-jumbo-1-bleeding-1sagitta1) precise; urgency=low
+
+  * Update driver dependencies 
+
+ -- epixoip <epixoip@token>  Tue, 29 Sep 2015 17:06:54 -0700
+
 hashstack-agent-plugin-jtr-opencl (1.8.0.4-jumbo-1-bleeding-0sagitta1) precise; urgency=low
 
   * update source, add new formats 

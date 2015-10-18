@@ -67,6 +67,13 @@
 
 #include "arch.h"
 
+#if !FAST_FORMATS_OMP
+#ifdef _OPENMP
+# define FORCE_THREAD_MD5_body
+#endif
+#undef _OPENMP
+#endif
+
 #include "misc.h"
 #include "common.h"
 #include "formats.h"
@@ -88,9 +95,26 @@ typedef struct Dynamic_Predicate_t
 typedef struct Dynamic_Str_Flag_t
 {
 	char *name;
-	unsigned flag_bit;
+	uint64_t flag_bit;
 } Dynamic_Str_Flag_t;
 
+#define LARGE_HASH_FUNCS(HASH) \
+	{ "DynamicFunc__" #HASH "_crypt_input1_append_input2", DynamicFunc__##HASH##_crypt_input1_append_input2 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input2_append_input1", DynamicFunc__##HASH##_crypt_input2_append_input1 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input1_overwrite_input1", DynamicFunc__##HASH##_crypt_input1_overwrite_input1 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input2_overwrite_input2", DynamicFunc__##HASH##_crypt_input2_overwrite_input2 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input1_overwrite_input2", DynamicFunc__##HASH##_crypt_input1_overwrite_input2 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input2_overwrite_input1", DynamicFunc__##HASH##_crypt_input2_overwrite_input1 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input1_to_output1", DynamicFunc__##HASH##_crypt_input1_to_output1 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input1_to_output2", DynamicFunc__##HASH##_crypt_input1_to_output2 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input1_to_output3", DynamicFunc__##HASH##_crypt_input1_to_output3 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input1_to_output4", DynamicFunc__##HASH##_crypt_input1_to_output4 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input2_to_output1", DynamicFunc__##HASH##_crypt_input2_to_output1 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input2_to_output2", DynamicFunc__##HASH##_crypt_input2_to_output2 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input2_to_output3", DynamicFunc__##HASH##_crypt_input2_to_output3 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input2_to_output4", DynamicFunc__##HASH##_crypt_input2_to_output4 }, \
+	{ "DynamicFunc__" #HASH "_crypt_input1_to_output1_FINAL", DynamicFunc__##HASH##_crypt_input1_to_output1_FINAL }, \
+	{ "DynamicFunc__" #HASH "_crypt_input2_to_output1_FINAL", DynamicFunc__##HASH##_crypt_input2_to_output1_FINAL },
 
 static Dynamic_Predicate_t Dynamic_Predicate[] =  {
 	{ "DynamicFunc__clean_input",  DynamicFunc__clean_input },
@@ -118,6 +142,7 @@ static Dynamic_Predicate_t Dynamic_Predicate[] =  {
 	{ "DynamicFunc__overwrite_from_last_output2_as_base16_no_size_fix", DynamicFunc__overwrite_from_last_output2_as_base16_no_size_fix },
 	{ "DynamicFunc__append_from_last_output_to_input2_as_base16", DynamicFunc__append_from_last_output_to_input2_as_base16 },
 	{ "DynamicFunc__overwrite_from_last_output_to_input2_as_base16_no_size_fix", DynamicFunc__overwrite_from_last_output_to_input2_as_base16_no_size_fix },
+	{ "DynamicFunc__overwrite_from_last_output2_to_input2_as_base16_no_size_fix", DynamicFunc__overwrite_from_last_output2_to_input2_as_base16_no_size_fix },
 	{ "DynamicFunc__append_from_last_output2_to_input1_as_base16", DynamicFunc__append_from_last_output2_to_input1_as_base16 },
 	{ "DynamicFunc__overwrite_from_last_output2_to_input1_as_base16_no_size_fix", DynamicFunc__overwrite_from_last_output2_to_input1_as_base16_no_size_fix },
 	{ "DynamicFunc__append_salt2", DynamicFunc__append_salt2 },
@@ -139,20 +164,45 @@ static Dynamic_Predicate_t Dynamic_Predicate[] =  {
 	{ "DynamicFunc__crypt_md5_to_input_raw_Overwrite_NoLen", DynamicFunc__crypt_md5_to_input_raw_Overwrite_NoLen },
 	{ "DynamicFunc__crypt_to_input_raw", DynamicFunc__crypt_md5_to_input_raw }, // support deprecated function
 	{ "DynamicFunc__crypt_md5_to_input_raw", DynamicFunc__crypt_md5_to_input_raw },
-	{ "DynamicFunc__PHPassCrypt", DynamicFunc__PHPassCrypt },
-	{ "DynamicFunc__FreeBSDMD5Crypt", DynamicFunc__FreeBSDMD5Crypt },
 	{ "DynamicFunc__POCrypt", DynamicFunc__POCrypt },
 	{ "DynamicFunc__set_input_len_16", DynamicFunc__set_input_len_16},
 	{ "DynamicFunc__set_input2_len_16", DynamicFunc__set_input2_len_16},
 	{ "DynamicFunc__set_input_len_20", DynamicFunc__set_input_len_20},
 	{ "DynamicFunc__set_input2_len_20", DynamicFunc__set_input2_len_20},
 	{ "DynamicFunc__set_input_len_32", DynamicFunc__set_input_len_32 },
+	{ "DynamicFunc__set_input_len_32_cleartop", DynamicFunc__set_input_len_32_cleartop },
 	{ "DynamicFunc__set_input2_len_32", DynamicFunc__set_input2_len_32 },
+	{ "DynamicFunc__set_input_len_24", DynamicFunc__set_input_len_24 },
+	{ "DynamicFunc__set_input2_len_24", DynamicFunc__set_input2_len_24 },
+	{ "DynamicFunc__set_input_len_28", DynamicFunc__set_input_len_28 },
+	{ "DynamicFunc__set_input2_len_28", DynamicFunc__set_input2_len_28 },
 	{ "DynamicFunc__set_input_len_40", DynamicFunc__set_input_len_40 },
 	{ "DynamicFunc__set_input2_len_40", DynamicFunc__set_input2_len_40 },
+	{ "DynamicFunc__set_input2_len_32_cleartop", DynamicFunc__set_input2_len_32_cleartop },
+	{ "DynamicFunc__set_input2_len_40_cleartop", DynamicFunc__set_input2_len_40_cleartop },
+	{ "DynamicFunc__set_input_len_48", DynamicFunc__set_input_len_48 },
+	{ "DynamicFunc__set_input_2len_48", DynamicFunc__set_input2_len_48 },
+	{ "DynamicFunc__set_input_len_56", DynamicFunc__set_input_len_56 },
+	{ "DynamicFunc__set_input2_len_56", DynamicFunc__set_input2_len_56 },
 	{ "DynamicFunc__set_input_len_64", DynamicFunc__set_input_len_64 },
 	{ "DynamicFunc__set_input2_len_64", DynamicFunc__set_input2_len_64 },
+	{ "DynamicFunc__set_input_len_80", DynamicFunc__set_input_len_80 },
+	{ "DynamicFunc__set_input_2len_80", DynamicFunc__set_input2_len_80 },
+	{ "DynamicFunc__set_input_len_96", DynamicFunc__set_input_len_96 },
+	{ "DynamicFunc__set_input_2len_96", DynamicFunc__set_input2_len_96 },
+
 	{ "DynamicFunc__set_input_len_100", DynamicFunc__set_input_len_100 },
+
+	{ "DynamicFunc__set_input_len_112", DynamicFunc__set_input_len_112 },
+	{ "DynamicFunc__set_input_2len_112", DynamicFunc__set_input2_len_112 },
+	{ "DynamicFunc__set_input_len_128", DynamicFunc__set_input_len_128 },
+	{ "DynamicFunc__set_input_2len_128", DynamicFunc__set_input2_len_128 },
+	{ "DynamicFunc__set_input_len_160", DynamicFunc__set_input_len_160 },
+	{ "DynamicFunc__set_input_2len_160", DynamicFunc__set_input2_len_160 },
+	{ "DynamicFunc__set_input_len_192", DynamicFunc__set_input_len_192 },
+	{ "DynamicFunc__set_input_2len_192", DynamicFunc__set_input2_len_192 },
+	{ "DynamicFunc__set_input_len_256", DynamicFunc__set_input_len_256 },
+	{ "DynamicFunc__set_input_2len_256", DynamicFunc__set_input2_len_256 },
 	{ "DynamicFunc__overwrite_salt_to_input1_no_size_fix", DynamicFunc__overwrite_salt_to_input1_no_size_fix },
 	{ "DynamicFunc__overwrite_salt_to_input2_no_size_fix", DynamicFunc__overwrite_salt_to_input2_no_size_fix },
 	{ "DynamicFunc__append_input1_from_CONST1", DynamicFunc__append_input1_from_CONST1 },
@@ -214,320 +264,56 @@ static Dynamic_Predicate_t Dynamic_Predicate[] =  {
 	{ "DynamicFunc__LargeHash_OUTMode_base16u", DynamicFunc__LargeHash_OUTMode_base16u },
 	{ "DynamicFunc__LargeHash_OUTMode_base64", DynamicFunc__LargeHash_OUTMode_base64 },
 	{ "DynamicFunc__LargeHash_OUTMode_base64_nte", DynamicFunc__LargeHash_OUTMode_base64_nte },
+	{ "DynamicFunc__LargeHash_OUTMode_base64c", DynamicFunc__LargeHash_OUTMode_base64c },
 	{ "DynamicFunc__LargeHash_OUTMode_raw", DynamicFunc__LargeHash_OUTMode_raw },
 
-	{ "DynamicFunc__SHA1_crypt_input1_append_input2", DynamicFunc__SHA1_crypt_input1_append_input2 },
-	{ "DynamicFunc__SHA1_crypt_input2_append_input1", DynamicFunc__SHA1_crypt_input2_append_input1 },
-	{ "DynamicFunc__SHA1_crypt_input1_overwrite_input1", DynamicFunc__SHA1_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__SHA1_crypt_input2_overwrite_input2", DynamicFunc__SHA1_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__SHA1_crypt_input1_overwrite_input2", DynamicFunc__SHA1_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__SHA1_crypt_input2_overwrite_input1", DynamicFunc__SHA1_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__SHA1_crypt_input1_to_output1_FINAL", DynamicFunc__SHA1_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__SHA1_crypt_input2_to_output1_FINAL", DynamicFunc__SHA1_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__SHA224_crypt_input1_append_input2", DynamicFunc__SHA224_crypt_input1_append_input2 },
-	{ "DynamicFunc__SHA224_crypt_input2_append_input1", DynamicFunc__SHA224_crypt_input2_append_input1 },
-	{ "DynamicFunc__SHA224_crypt_input1_overwrite_input1", DynamicFunc__SHA224_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__SHA224_crypt_input2_overwrite_input2", DynamicFunc__SHA224_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__SHA224_crypt_input1_overwrite_input2", DynamicFunc__SHA224_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__SHA224_crypt_input2_overwrite_input1", DynamicFunc__SHA224_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__SHA224_crypt_input1_to_output1_FINAL", DynamicFunc__SHA224_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__SHA224_crypt_input2_to_output1_FINAL", DynamicFunc__SHA224_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__SHA256_crypt_input1_append_input2", DynamicFunc__SHA256_crypt_input1_append_input2 },
-	{ "DynamicFunc__SHA256_crypt_input2_append_input1", DynamicFunc__SHA256_crypt_input2_append_input1 },
-	{ "DynamicFunc__SHA256_crypt_input1_overwrite_input1", DynamicFunc__SHA256_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__SHA256_crypt_input2_overwrite_input2", DynamicFunc__SHA256_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__SHA256_crypt_input1_overwrite_input2", DynamicFunc__SHA256_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__SHA256_crypt_input2_overwrite_input1", DynamicFunc__SHA256_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__SHA256_crypt_input1_to_output1_FINAL", DynamicFunc__SHA256_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__SHA256_crypt_input2_to_output1_FINAL", DynamicFunc__SHA256_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__SHA384_crypt_input1_append_input2", DynamicFunc__SHA384_crypt_input1_append_input2 },
-	{ "DynamicFunc__SHA384_crypt_input2_append_input1", DynamicFunc__SHA384_crypt_input2_append_input1 },
-	{ "DynamicFunc__SHA384_crypt_input1_overwrite_input1", DynamicFunc__SHA384_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__SHA384_crypt_input2_overwrite_input2", DynamicFunc__SHA384_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__SHA384_crypt_input1_overwrite_input2", DynamicFunc__SHA384_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__SHA384_crypt_input2_overwrite_input1", DynamicFunc__SHA384_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__SHA384_crypt_input1_to_output1_FINAL", DynamicFunc__SHA384_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__SHA384_crypt_input2_to_output1_FINAL", DynamicFunc__SHA384_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__SHA512_crypt_input1_append_input2", DynamicFunc__SHA512_crypt_input1_append_input2 },
-	{ "DynamicFunc__SHA512_crypt_input2_append_input1", DynamicFunc__SHA512_crypt_input2_append_input1 },
-	{ "DynamicFunc__SHA512_crypt_input1_overwrite_input1", DynamicFunc__SHA512_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__SHA512_crypt_input2_overwrite_input2", DynamicFunc__SHA512_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__SHA512_crypt_input1_overwrite_input2", DynamicFunc__SHA512_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__SHA512_crypt_input2_overwrite_input1", DynamicFunc__SHA512_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__SHA512_crypt_input1_to_output1_FINAL", DynamicFunc__SHA512_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__SHA512_crypt_input2_to_output1_FINAL", DynamicFunc__SHA512_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__GOST_crypt_input1_append_input2", DynamicFunc__GOST_crypt_input1_append_input2 },
-	{ "DynamicFunc__GOST_crypt_input2_append_input1", DynamicFunc__GOST_crypt_input2_append_input1 },
-	{ "DynamicFunc__GOST_crypt_input1_overwrite_input1", DynamicFunc__GOST_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__GOST_crypt_input2_overwrite_input2", DynamicFunc__GOST_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__GOST_crypt_input1_overwrite_input2", DynamicFunc__GOST_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__GOST_crypt_input2_overwrite_input1", DynamicFunc__GOST_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__GOST_crypt_input1_to_output1_FINAL", DynamicFunc__GOST_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__GOST_crypt_input2_to_output1_FINAL", DynamicFunc__GOST_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input1_append_input2", DynamicFunc__WHIRLPOOL_crypt_input1_append_input2 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input2_append_input1", DynamicFunc__WHIRLPOOL_crypt_input2_append_input1 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input1_overwrite_input1", DynamicFunc__WHIRLPOOL_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input2_overwrite_input2", DynamicFunc__WHIRLPOOL_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input1_overwrite_input2", DynamicFunc__WHIRLPOOL_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input2_overwrite_input1", DynamicFunc__WHIRLPOOL_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input1_to_output1_FINAL", DynamicFunc__WHIRLPOOL_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input2_to_output1_FINAL", DynamicFunc__WHIRLPOOL_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__Tiger_crypt_input1_append_input2", DynamicFunc__Tiger_crypt_input1_append_input2 },
-	{ "DynamicFunc__Tiger_crypt_input2_append_input1", DynamicFunc__Tiger_crypt_input2_append_input1 },
-	{ "DynamicFunc__Tiger_crypt_input1_overwrite_input1", DynamicFunc__Tiger_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__Tiger_crypt_input2_overwrite_input2", DynamicFunc__Tiger_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__Tiger_crypt_input1_overwrite_input2", DynamicFunc__Tiger_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__Tiger_crypt_input2_overwrite_input1", DynamicFunc__Tiger_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__Tiger_crypt_input1_to_output1_FINAL", DynamicFunc__Tiger_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__Tiger_crypt_input2_to_output1_FINAL", DynamicFunc__Tiger_crypt_input2_to_output1_FINAL },
-
-	{ "DynamicFunc__MD5_crypt_input1_append_input2", DynamicFunc__MD5_crypt_input1_append_input2 },
-	{ "DynamicFunc__MD5_crypt_input2_append_input1", DynamicFunc__MD5_crypt_input2_append_input1 },
-	{ "DynamicFunc__MD5_crypt_input1_overwrite_input1", DynamicFunc__MD5_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__MD5_crypt_input2_overwrite_input2", DynamicFunc__MD5_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__MD5_crypt_input1_overwrite_input2", DynamicFunc__MD5_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__MD5_crypt_input2_overwrite_input1", DynamicFunc__MD5_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__MD5_crypt_input1_to_output1_FINAL", DynamicFunc__MD5_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__MD5_crypt_input2_to_output1_FINAL", DynamicFunc__MD5_crypt_input2_to_output1_FINAL },
-
-	{ "DynamicFunc__MD4_crypt_input1_append_input2", DynamicFunc__MD4_crypt_input1_append_input2 },
-	{ "DynamicFunc__MD4_crypt_input2_append_input1", DynamicFunc__MD4_crypt_input2_append_input1 },
-	{ "DynamicFunc__MD4_crypt_input1_overwrite_input1", DynamicFunc__MD4_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__MD4_crypt_input2_overwrite_input2", DynamicFunc__MD4_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__MD4_crypt_input1_overwrite_input2", DynamicFunc__MD4_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__MD4_crypt_input2_overwrite_input1", DynamicFunc__MD4_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__MD4_crypt_input1_to_output1_FINAL", DynamicFunc__MD4_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__MD4_crypt_input2_to_output1_FINAL", DynamicFunc__MD4_crypt_input2_to_output1_FINAL },
-
-	{ "DynamicFunc__RIPEMD128_crypt_input1_append_input2", DynamicFunc__RIPEMD128_crypt_input1_append_input2 },
-	{ "DynamicFunc__RIPEMD128_crypt_input2_append_input1", DynamicFunc__RIPEMD128_crypt_input2_append_input1 },
-	{ "DynamicFunc__RIPEMD128_crypt_input1_overwrite_input1", DynamicFunc__RIPEMD128_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__RIPEMD128_crypt_input2_overwrite_input2", DynamicFunc__RIPEMD128_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__RIPEMD128_crypt_input1_overwrite_input2", DynamicFunc__RIPEMD128_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__RIPEMD128_crypt_input2_overwrite_input1", DynamicFunc__RIPEMD128_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__RIPEMD128_crypt_input1_to_output1_FINAL", DynamicFunc__RIPEMD128_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__RIPEMD128_crypt_input2_to_output1_FINAL", DynamicFunc__RIPEMD128_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__RIPEMD160_crypt_input1_append_input2", DynamicFunc__RIPEMD160_crypt_input1_append_input2 },
-	{ "DynamicFunc__RIPEMD160_crypt_input2_append_input1", DynamicFunc__RIPEMD160_crypt_input2_append_input1 },
-	{ "DynamicFunc__RIPEMD160_crypt_input1_overwrite_input1", DynamicFunc__RIPEMD160_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__RIPEMD160_crypt_input2_overwrite_input2", DynamicFunc__RIPEMD160_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__RIPEMD160_crypt_input1_overwrite_input2", DynamicFunc__RIPEMD160_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__RIPEMD160_crypt_input2_overwrite_input1", DynamicFunc__RIPEMD160_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__RIPEMD160_crypt_input1_to_output1_FINAL", DynamicFunc__RIPEMD160_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__RIPEMD160_crypt_input2_to_output1_FINAL", DynamicFunc__RIPEMD160_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__RIPEMD256_crypt_input1_append_input2", DynamicFunc__RIPEMD256_crypt_input1_append_input2 },
-	{ "DynamicFunc__RIPEMD256_crypt_input2_append_input1", DynamicFunc__RIPEMD256_crypt_input2_append_input1 },
-	{ "DynamicFunc__RIPEMD256_crypt_input1_overwrite_input1", DynamicFunc__RIPEMD256_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__RIPEMD256_crypt_input2_overwrite_input2", DynamicFunc__RIPEMD256_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__RIPEMD256_crypt_input1_overwrite_input2", DynamicFunc__RIPEMD256_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__RIPEMD256_crypt_input2_overwrite_input1", DynamicFunc__RIPEMD256_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__RIPEMD256_crypt_input1_to_output1_FINAL", DynamicFunc__RIPEMD256_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__RIPEMD256_crypt_input2_to_output1_FINAL", DynamicFunc__RIPEMD256_crypt_input2_to_output1_FINAL },
-	{ "DynamicFunc__RIPEMD320_crypt_input1_append_input2", DynamicFunc__RIPEMD320_crypt_input1_append_input2 },
-	{ "DynamicFunc__RIPEMD320_crypt_input2_append_input1", DynamicFunc__RIPEMD320_crypt_input2_append_input1 },
-	{ "DynamicFunc__RIPEMD320_crypt_input1_overwrite_input1", DynamicFunc__RIPEMD320_crypt_input1_overwrite_input1 },
-	{ "DynamicFunc__RIPEMD320_crypt_input2_overwrite_input2", DynamicFunc__RIPEMD320_crypt_input2_overwrite_input2 },
-	{ "DynamicFunc__RIPEMD320_crypt_input1_overwrite_input2", DynamicFunc__RIPEMD320_crypt_input1_overwrite_input2 },
-	{ "DynamicFunc__RIPEMD320_crypt_input2_overwrite_input1", DynamicFunc__RIPEMD320_crypt_input2_overwrite_input1 },
-	{ "DynamicFunc__RIPEMD320_crypt_input1_to_output1_FINAL", DynamicFunc__RIPEMD320_crypt_input1_to_output1_FINAL },
-	{ "DynamicFunc__RIPEMD320_crypt_input2_to_output1_FINAL", DynamicFunc__RIPEMD320_crypt_input2_to_output1_FINAL },
-
-
-	/* These are now depricated.  When we find them, 2 functions get called. The functions HAVE been kept in dynamic_fmt.c, but they are VERY thin */
-	{ "DynamicFunc__SHA1_crypt_input1_append_input2_base16", DynamicFunc__SHA1_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__SHA1_crypt_input2_append_input1_base16", DynamicFunc__SHA1_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__SHA1_crypt_input1_overwrite_input1_base16", DynamicFunc__SHA1_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA1_crypt_input2_overwrite_input2_base16", DynamicFunc__SHA1_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA1_crypt_input1_overwrite_input2_base16", DynamicFunc__SHA1_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA1_crypt_input2_overwrite_input1_base16", DynamicFunc__SHA1_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA224_crypt_input1_append_input2_base16", DynamicFunc__SHA224_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__SHA224_crypt_input2_append_input1_base16", DynamicFunc__SHA224_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__SHA224_crypt_input1_overwrite_input1_base16", DynamicFunc__SHA224_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA224_crypt_input2_overwrite_input2_base16", DynamicFunc__SHA224_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA224_crypt_input1_overwrite_input2_base16", DynamicFunc__SHA224_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA224_crypt_input2_overwrite_input1_base16", DynamicFunc__SHA224_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA256_crypt_input1_append_input2_base16", DynamicFunc__SHA256_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__SHA256_crypt_input2_append_input1_base16", DynamicFunc__SHA256_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__SHA256_crypt_input1_overwrite_input1_base16", DynamicFunc__SHA256_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA256_crypt_input2_overwrite_input2_base16", DynamicFunc__SHA256_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA256_crypt_input1_overwrite_input2_base16", DynamicFunc__SHA256_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA256_crypt_input2_overwrite_input1_base16", DynamicFunc__SHA256_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA384_crypt_input1_append_input2_base16", DynamicFunc__SHA384_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__SHA384_crypt_input2_append_input1_base16", DynamicFunc__SHA384_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__SHA384_crypt_input1_overwrite_input1_base16", DynamicFunc__SHA384_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA384_crypt_input2_overwrite_input2_base16", DynamicFunc__SHA384_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA384_crypt_input1_overwrite_input2_base16", DynamicFunc__SHA384_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA384_crypt_input2_overwrite_input1_base16", DynamicFunc__SHA384_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA512_crypt_input1_append_input2_base16", DynamicFunc__SHA512_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__SHA512_crypt_input2_append_input1_base16", DynamicFunc__SHA512_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__SHA512_crypt_input1_overwrite_input1_base16", DynamicFunc__SHA512_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__SHA512_crypt_input2_overwrite_input2_base16", DynamicFunc__SHA512_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA512_crypt_input1_overwrite_input2_base16", DynamicFunc__SHA512_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__SHA512_crypt_input2_overwrite_input1_base16", DynamicFunc__SHA512_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__GOST_crypt_input1_append_input2_base16", DynamicFunc__GOST_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__GOST_crypt_input2_append_input1_base16", DynamicFunc__GOST_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__GOST_crypt_input1_overwrite_input1_base16", DynamicFunc__GOST_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__GOST_crypt_input2_overwrite_input2_base16", DynamicFunc__GOST_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__GOST_crypt_input1_overwrite_input2_base16", DynamicFunc__GOST_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__GOST_crypt_input2_overwrite_input1_base16", DynamicFunc__GOST_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input1_append_input2_base16", DynamicFunc__WHIRLPOOL_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input2_append_input1_base16", DynamicFunc__WHIRLPOOL_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input1_overwrite_input1_base16", DynamicFunc__WHIRLPOOL_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input2_overwrite_input2_base16", DynamicFunc__WHIRLPOOL_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input1_overwrite_input2_base16", DynamicFunc__WHIRLPOOL_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__WHIRLPOOL_crypt_input2_overwrite_input1_base16", DynamicFunc__WHIRLPOOL_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__Tiger_crypt_input1_append_input2_base16", DynamicFunc__Tiger_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__Tiger_crypt_input2_append_input1_base16", DynamicFunc__Tiger_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__Tiger_crypt_input1_overwrite_input1_base16", DynamicFunc__Tiger_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__Tiger_crypt_input2_overwrite_input2_base16", DynamicFunc__Tiger_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__Tiger_crypt_input1_overwrite_input2_base16", DynamicFunc__Tiger_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__Tiger_crypt_input2_overwrite_input1_base16", DynamicFunc__Tiger_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__MD5_crypt_input1_append_input2_base16", DynamicFunc__MD5_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__MD5_crypt_input2_append_input1_base16", DynamicFunc__MD5_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__MD5_crypt_input1_overwrite_input1_base16", DynamicFunc__MD5_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__MD5_crypt_input2_overwrite_input2_base16", DynamicFunc__MD5_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__MD5_crypt_input1_overwrite_input2_base16", DynamicFunc__MD5_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__MD5_crypt_input2_overwrite_input1_base16", DynamicFunc__MD5_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__MD4_crypt_input1_append_input2_base16", DynamicFunc__MD4_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__MD4_crypt_input2_append_input1_base16", DynamicFunc__MD4_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__MD4_crypt_input1_overwrite_input1_base16", DynamicFunc__MD4_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__MD4_crypt_input2_overwrite_input2_base16", DynamicFunc__MD4_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__MD4_crypt_input1_overwrite_input2_base16", DynamicFunc__MD4_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__MD4_crypt_input2_overwrite_input1_base16", DynamicFunc__MD4_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__RIPEMD128_crypt_input1_append_input2_base16", DynamicFunc__RIPEMD128_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__RIPEMD128_crypt_input2_append_input1_base16", DynamicFunc__RIPEMD128_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__RIPEMD128_crypt_input1_overwrite_input1_base16", DynamicFunc__RIPEMD128_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__RIPEMD128_crypt_input2_overwrite_input2_base16", DynamicFunc__RIPEMD128_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__RIPEMD128_crypt_input1_overwrite_input2_base16", DynamicFunc__RIPEMD128_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__RIPEMD128_crypt_input2_overwrite_input1_base16", DynamicFunc__RIPEMD128_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__RIPEMD160_crypt_input1_append_input2_base16", DynamicFunc__RIPEMD160_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__RIPEMD160_crypt_input2_append_input1_base16", DynamicFunc__RIPEMD160_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__RIPEMD160_crypt_input1_overwrite_input1_base16", DynamicFunc__RIPEMD160_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__RIPEMD160_crypt_input2_overwrite_input2_base16", DynamicFunc__RIPEMD160_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__RIPEMD160_crypt_input1_overwrite_input2_base16", DynamicFunc__RIPEMD160_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__RIPEMD160_crypt_input2_overwrite_input1_base16", DynamicFunc__RIPEMD160_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__RIPEMD256_crypt_input1_append_input2_base16", DynamicFunc__RIPEMD256_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__RIPEMD256_crypt_input2_append_input1_base16", DynamicFunc__RIPEMD256_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__RIPEMD256_crypt_input1_overwrite_input1_base16", DynamicFunc__RIPEMD256_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__RIPEMD256_crypt_input2_overwrite_input2_base16", DynamicFunc__RIPEMD256_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__RIPEMD256_crypt_input1_overwrite_input2_base16", DynamicFunc__RIPEMD256_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__RIPEMD256_crypt_input2_overwrite_input1_base16", DynamicFunc__RIPEMD256_crypt_input2_overwrite_input1_base16 },
-	{ "DynamicFunc__RIPEMD320_crypt_input1_append_input2_base16", DynamicFunc__RIPEMD320_crypt_input1_append_input2_base16 },
-	{ "DynamicFunc__RIPEMD320_crypt_input2_append_input1_base16", DynamicFunc__RIPEMD320_crypt_input2_append_input1_base16 },
-	{ "DynamicFunc__RIPEMD320_crypt_input1_overwrite_input1_base16", DynamicFunc__RIPEMD320_crypt_input1_overwrite_input1_base16 },
-	{ "DynamicFunc__RIPEMD320_crypt_input2_overwrite_input2_base16", DynamicFunc__RIPEMD320_crypt_input2_overwrite_input2_base16 },
-	{ "DynamicFunc__RIPEMD320_crypt_input1_overwrite_input2_base16", DynamicFunc__RIPEMD320_crypt_input1_overwrite_input2_base16 },
-	{ "DynamicFunc__RIPEMD320_crypt_input2_overwrite_input1_base16", DynamicFunc__RIPEMD320_crypt_input2_overwrite_input1_base16 },
-
-	// Depricated.  These are the 'original' md5_gen version. We have changed to using Dynamic_Func__ but still 'parse'
-	// and use the MD5GenBaseFunc__ script files.
-	{ "MD5GenBaseFunc__clean_input",  DynamicFunc__clean_input },
-	{ "MD5GenBaseFunc__clean_input_kwik", DynamicFunc__clean_input_kwik },
-	{ "MD5GenBaseFunc__clean_input_full", DynamicFunc__clean_input_full },
-	{ "MD5GenBaseFunc__append_keys", DynamicFunc__append_keys },
-	{ "MD5GenBaseFunc__crypt", DynamicFunc__crypt_md5 },
-	{ "MD5GenBaseFunc__append_from_last_output_as_base16", DynamicFunc__append_from_last_output_as_base16 },
-	{ "MD5GenBaseFunc__overwrite_from_last_output_as_base16_no_size_fix", DynamicFunc__overwrite_from_last_output_as_base16_no_size_fix },
-	{ "MD5GenBaseFunc__crypt_to_input_raw_Overwrite_NoLen_but_setlen_in_SSE", DynamicFunc__crypt_md5_to_input_raw_Overwrite_NoLen_but_setlen_in_SSE },
-	{ "MD5GenBaseFunc__append_salt", DynamicFunc__append_salt },
-	{ "MD5GenBaseFunc__set_input_len_32", DynamicFunc__set_input_len_32 },
-	{ "MD5GenBaseFunc__clean_input2", DynamicFunc__clean_input2 },
-	{ "MD5GenBaseFunc__clean_input2_kwik", DynamicFunc__clean_input2_kwik },
-	{ "MD5GenBaseFunc__clean_input2_full", DynamicFunc__clean_input2_full },
-	{ "MD5GenBaseFunc__append_keys2", DynamicFunc__append_keys2 },
-	{ "MD5GenBaseFunc__crypt2", DynamicFunc__crypt2_md5 },
-	{ "MD5GenBaseFunc__append_from_last_output2_as_base16", DynamicFunc__append_from_last_output2_as_base16 },
-	{ "MD5GenBaseFunc__overwrite_from_last_output2_as_base16_no_size_fix", DynamicFunc__overwrite_from_last_output2_as_base16_no_size_fix },
-	{ "MD5GenBaseFunc__append_from_last_output_to_input2_as_base16", DynamicFunc__append_from_last_output_to_input2_as_base16 },
-	{ "MD5GenBaseFunc__overwrite_from_last_output_to_input2_as_base16_no_size_fix", DynamicFunc__overwrite_from_last_output_to_input2_as_base16_no_size_fix },
-	{ "MD5GenBaseFunc__append_from_last_output2_to_input1_as_base16", DynamicFunc__append_from_last_output2_to_input1_as_base16 },
-	{ "MD5GenBaseFunc__overwrite_from_last_output2_to_input1_as_base16_no_size_fix", DynamicFunc__overwrite_from_last_output2_to_input1_as_base16_no_size_fix },
-	{ "MD5GenBaseFunc__append_salt2", DynamicFunc__append_salt2 },
-	{ "MD5GenBaseFunc__set_input2_len_32", DynamicFunc__set_input2_len_32 },
-	{ "MD5GenBaseFunc__append_input_from_input2", DynamicFunc__append_input_from_input2 },
-	{ "MD5GenBaseFunc__append_input2_from_input", DynamicFunc__append_input2_from_input },
-	{ "MD5GenBaseFunc__append_2nd_salt", DynamicFunc__append_2nd_salt },
-	{ "MD5GenBaseFunc__append_2nd_salt2", DynamicFunc__append_2nd_salt2 },
-	{ "MD5GenBaseFunc__append_userid", DynamicFunc__append_userid },
-	{ "MD5GenBaseFunc__append_userid2", DynamicFunc__append_userid2 },
-	{ "MD5GenBaseFunc__crypt_in1_to_out2", DynamicFunc__crypt_md5_in1_to_out2 },
-	{ "MD5GenBaseFunc__crypt_in2_to_out1", DynamicFunc__crypt_md5_in2_to_out1 },
-	{ "MD5GenBaseFunc__crypt_to_input_raw_Overwrite_NoLen", DynamicFunc__crypt_md5_to_input_raw_Overwrite_NoLen },
-	{ "MD5GenBaseFunc__crypt_to_input_raw", DynamicFunc__crypt_md5_to_input_raw },
-	{ "MD5GenBaseFunc__PHPassCrypt", DynamicFunc__PHPassCrypt },
-	{ "MD5GenBaseFunc__FreeBSDMD5Crypt", DynamicFunc__FreeBSDMD5Crypt },
-	{ "MD5GenBaseFunc__POCrypt", DynamicFunc__POCrypt },
-	{ "MD5GenBaseFunc__set_input_len_16", DynamicFunc__set_input_len_16},
-	{ "MD5GenBaseFunc__set_input2_len_16", DynamicFunc__set_input2_len_16},
-	{ "MD5GenBaseFunc__set_input_len_64", DynamicFunc__set_input_len_64 },
-	{ "MD5GenBaseFunc__set_input2_len_64", DynamicFunc__set_input2_len_64 },
-	{ "MD5GenBaseFunc__overwrite_salt_to_input1_no_size_fix", DynamicFunc__overwrite_salt_to_input1_no_size_fix },
-	{ "MD5GenBaseFunc__overwrite_salt_to_input2_no_size_fix", DynamicFunc__overwrite_salt_to_input2_no_size_fix },
-	{ "MD5GenBaseFunc__append_input1_from_CONST1", DynamicFunc__append_input1_from_CONST1 },
-	{ "MD5GenBaseFunc__append_input1_from_CONST2", DynamicFunc__append_input1_from_CONST2 },
-	{ "MD5GenBaseFunc__append_input1_from_CONST3", DynamicFunc__append_input1_from_CONST3 },
-	{ "MD5GenBaseFunc__append_input1_from_CONST4", DynamicFunc__append_input1_from_CONST4 },
-	{ "MD5GenBaseFunc__append_input1_from_CONST5", DynamicFunc__append_input1_from_CONST5 },
-	{ "MD5GenBaseFunc__append_input1_from_CONST6", DynamicFunc__append_input1_from_CONST6 },
-	{ "MD5GenBaseFunc__append_input1_from_CONST7", DynamicFunc__append_input1_from_CONST7 },
-	{ "MD5GenBaseFunc__append_input1_from_CONST8", DynamicFunc__append_input1_from_CONST8 },
-	{ "MD5GenBaseFunc__append_input2_from_CONST1", DynamicFunc__append_input2_from_CONST1 },
-	{ "MD5GenBaseFunc__append_input2_from_CONST2", DynamicFunc__append_input2_from_CONST2 },
-	{ "MD5GenBaseFunc__append_input2_from_CONST3", DynamicFunc__append_input2_from_CONST3 },
-	{ "MD5GenBaseFunc__append_input2_from_CONST4", DynamicFunc__append_input2_from_CONST4 },
-	{ "MD5GenBaseFunc__append_input2_from_CONST5", DynamicFunc__append_input2_from_CONST5 },
-	{ "MD5GenBaseFunc__append_input2_from_CONST6", DynamicFunc__append_input2_from_CONST6 },
-	{ "MD5GenBaseFunc__append_input2_from_CONST7", DynamicFunc__append_input2_from_CONST7 },
-	{ "MD5GenBaseFunc__append_input2_from_CONST8", DynamicFunc__append_input2_from_CONST8 },
-	{ "MD5GenBaseFunc__SSEtoX86_switch_input1", DynamicFunc__SSEtoX86_switch_input1 },
-	{ "MD5GenBaseFunc__SSEtoX86_switch_input2", DynamicFunc__SSEtoX86_switch_input2 },
-	{ "MD5GenBaseFunc__SSEtoX86_switch_output1", DynamicFunc__SSEtoX86_switch_output1 },
-	{ "MD5GenBaseFunc__SSEtoX86_switch_output2", DynamicFunc__SSEtoX86_switch_output2 },
-	{ "MD5GenBaseFunc__X86toSSE_switch_input1", DynamicFunc__X86toSSE_switch_input1 },
-	{ "MD5GenBaseFunc__X86toSSE_switch_input2", DynamicFunc__X86toSSE_switch_input2 },
-	{ "MD5GenBaseFunc__X86toSSE_switch_output1", DynamicFunc__X86toSSE_switch_output1 },
-	{ "MD5GenBaseFunc__X86toSSE_switch_output2", DynamicFunc__X86toSSE_switch_output2 },
-	{ "MD5GenBaseFunc__ToSSE", DynamicFunc__ToSSE },
-	{ "MD5GenBaseFunc__ToX86", DynamicFunc__ToX86 },
-	{ "MD5GenBaseFunc__setmode_unicode", DynamicFunc__setmode_unicode },
-	{ "MD5GenBaseFunc__setmode_normal", DynamicFunc__setmode_normal },
-	{ "MD5GenBaseFunc__base16_convert_locase", DynamicFunc__base16_convert_locase },
-	{ "MD5GenBaseFunc__base16_convert_upcase", DynamicFunc__base16_convert_upcase },
-	{ "MD5GenBaseFunc__append_fld0", DynamicFunc__append_fld0 },
-	{ "MD5GenBaseFunc__append_fld1", DynamicFunc__append_fld1 },
-	{ "MD5GenBaseFunc__append_fld2", DynamicFunc__append_fld2 },
-	{ "MD5GenBaseFunc__append_fld3", DynamicFunc__append_fld3 },
-	{ "MD5GenBaseFunc__append_fld4", DynamicFunc__append_fld4 },
-	{ "MD5GenBaseFunc__append_fld5", DynamicFunc__append_fld5 },
-	{ "MD5GenBaseFunc__append_fld6", DynamicFunc__append_fld6 },
-	{ "MD5GenBaseFunc__append_fld7", DynamicFunc__append_fld7 },
-	{ "MD5GenBaseFunc__append_fld8", DynamicFunc__append_fld8 },
-	{ "MD5GenBaseFunc__append_fld9", DynamicFunc__append_fld9 },
-	{ "MD5GenBaseFunc__append2_fld0", DynamicFunc__append2_fld0 },
-	{ "MD5GenBaseFunc__append2_fld1", DynamicFunc__append2_fld1 },
-	{ "MD5GenBaseFunc__append2_fld2", DynamicFunc__append2_fld2 },
-	{ "MD5GenBaseFunc__append2_fld3", DynamicFunc__append2_fld3 },
-	{ "MD5GenBaseFunc__append2_fld4", DynamicFunc__append2_fld4 },
-	{ "MD5GenBaseFunc__append2_fld5", DynamicFunc__append2_fld5 },
-	{ "MD5GenBaseFunc__append2_fld6", DynamicFunc__append2_fld6 },
-	{ "MD5GenBaseFunc__append2_fld7", DynamicFunc__append2_fld7 },
-	{ "MD5GenBaseFunc__append2_fld8", DynamicFunc__append2_fld8 },
-	{ "MD5GenBaseFunc__append2_fld9", DynamicFunc__append2_fld9 },
-	{ "MD5GenBaseFunc__SHA1_crypt_input1_append_input2_base16", DynamicFunc__SHA1_crypt_input1_append_input2_base16 },
-	{ "MD5GenBaseFunc__SHA1_crypt_input2_append_input1_base16", DynamicFunc__SHA1_crypt_input2_append_input1_base16 },
-	{ "MD5GenBaseFunc__SHA1_crypt_input1_overwrite_input1_base16", DynamicFunc__SHA1_crypt_input1_overwrite_input1_base16 },
-	{ "MD5GenBaseFunc__SHA1_crypt_input2_overwrite_input2_base16", DynamicFunc__SHA1_crypt_input2_overwrite_input2_base16 },
-	{ "MD5GenBaseFunc__SHA1_crypt_input1_overwrite_input2_base16", DynamicFunc__SHA1_crypt_input1_overwrite_input2_base16 },
-	{ "MD5GenBaseFunc__SHA1_crypt_input2_overwrite_input1_base16", DynamicFunc__SHA1_crypt_input2_overwrite_input1_base16 },
-	{ "MD5GenBaseFunc__SHA1_crypt_input1_to_output1_FINAL", DynamicFunc__SHA1_crypt_input1_to_output1_FINAL },
-	{ "MD5GenBaseFunc__SHA1_crypt_input2_to_output1_FINAL", DynamicFunc__SHA1_crypt_input2_to_output1_FINAL },
-	{ "MD5GenBaseFunc__PHPassSetup", DynamicFunc__PHPassSetup },
-	{ "MD5GenBaseFunc__InitialLoadKeysToInput", DynamicFunc__InitialLoadKeysToInput },
-	{ "MD5GenBaseFunc__InitialLoadKeys_md5crypt_ToOutput2", DynamicFunc__InitialLoadKeys_md5crypt_ToOutput2 },
-	{ "MD5GenBaseFunc__InitialLoadKeys_md5crypt_ToOutput2_Base16_to_Input1", DynamicFunc__InitialLoadKeys_md5crypt_ToOutput2_Base16_to_Input1 },
-	{ "MD5GenBaseFunc__InitialLoadKeys_md5crypt_ToOutput2_Base16_to_Input1_offset32", DynamicFunc__InitialLoadKeys_md5crypt_ToOutput2_Base16_to_Input1_offset32 },
-
+	LARGE_HASH_FUNCS(MD5)
+	LARGE_HASH_FUNCS(MD4)
+	LARGE_HASH_FUNCS(SHA1)
+	LARGE_HASH_FUNCS(SHA224)
+	LARGE_HASH_FUNCS(SHA256)
+	LARGE_HASH_FUNCS(SHA384)
+	LARGE_HASH_FUNCS(SHA512)
+	LARGE_HASH_FUNCS(GOST)
+	LARGE_HASH_FUNCS(WHIRLPOOL)
+	LARGE_HASH_FUNCS(Tiger)
+	LARGE_HASH_FUNCS(RIPEMD128)
+	LARGE_HASH_FUNCS(RIPEMD160)
+	LARGE_HASH_FUNCS(RIPEMD256)
+	LARGE_HASH_FUNCS(RIPEMD320)
+	LARGE_HASH_FUNCS(HAVAL128_3)
+	LARGE_HASH_FUNCS(HAVAL128_4)
+	LARGE_HASH_FUNCS(HAVAL128_5)
+	LARGE_HASH_FUNCS(HAVAL160_3)
+	LARGE_HASH_FUNCS(HAVAL160_4)
+	LARGE_HASH_FUNCS(HAVAL160_5)
+	LARGE_HASH_FUNCS(HAVAL192_3)
+	LARGE_HASH_FUNCS(HAVAL192_4)
+	LARGE_HASH_FUNCS(HAVAL192_5)
+	LARGE_HASH_FUNCS(HAVAL224_3)
+	LARGE_HASH_FUNCS(HAVAL224_4)
+	LARGE_HASH_FUNCS(HAVAL224_5)
+	LARGE_HASH_FUNCS(HAVAL256_3)
+	LARGE_HASH_FUNCS(HAVAL256_4)
+	LARGE_HASH_FUNCS(HAVAL256_5)
+	LARGE_HASH_FUNCS(MD2)
+	LARGE_HASH_FUNCS(PANAMA)
+	LARGE_HASH_FUNCS(SKEIN224)
+	LARGE_HASH_FUNCS(SKEIN256)
+	LARGE_HASH_FUNCS(SKEIN384)
+	LARGE_HASH_FUNCS(SKEIN512)
+	LARGE_HASH_FUNCS(SHA3_224)
+	LARGE_HASH_FUNCS(SHA3_256)
+	LARGE_HASH_FUNCS(SHA3_384)
+	LARGE_HASH_FUNCS(SHA3_512)
+	LARGE_HASH_FUNCS(KECCAK_256)
+	LARGE_HASH_FUNCS(KECCAK_512)
+	// LARGE_HASH_EDIT_POINT
 	{ NULL, NULL }};
+
+
+#define SALT_AS_HEX_FLAG(HASH) \
+	{ "MGF_SALT_AS_HEX_" #HASH,             MGF_SALT_AS_HEX_##HASH },
 
 static Dynamic_Str_Flag_t Dynamic_Str_Flag[] =  {
 	{ "MGF_NOTSSE2Safe",                  MGF_NOTSSE2Safe },
@@ -543,8 +329,52 @@ static Dynamic_Str_Flag_t Dynamic_Str_Flag[] =  {
 	{ "MGF_INPBASE64b",                   MGF_INPBASE64b },
 	{ "MGF_INPBASE64m",                   MGF_INPBASE64m },
 	{ "MGF_INPBASE64a",                   MGF_INPBASE64a },
-	{ "MGF_SALT_AS_HEX",                  MGF_SALT_AS_HEX },
+	{ "MGF_SALT_AS_HEX",                  MGF_SALT_AS_HEX },  // Deprecated (use the _MD5 version.
 	{ "MFG_SALT_AS_HEX",                  MGF_SALT_AS_HEX },  // Deprecated misspelling
+	SALT_AS_HEX_FLAG(MD5)
+	SALT_AS_HEX_FLAG(MD4)
+	SALT_AS_HEX_FLAG(SHA1)
+	SALT_AS_HEX_FLAG(SHA224)
+	SALT_AS_HEX_FLAG(SHA256)
+	SALT_AS_HEX_FLAG(SHA384)
+	SALT_AS_HEX_FLAG(SHA512)
+	SALT_AS_HEX_FLAG(GOST)
+	SALT_AS_HEX_FLAG(WHIRLPOOL)
+	SALT_AS_HEX_FLAG(Tiger)
+	SALT_AS_HEX_FLAG(TIGER)
+	SALT_AS_HEX_FLAG(RIPEMD128)
+	SALT_AS_HEX_FLAG(RIPEMD160)
+	SALT_AS_HEX_FLAG(RIPEMD256)
+	SALT_AS_HEX_FLAG(RIPEMD320)
+	SALT_AS_HEX_FLAG(HAVAL128_3)
+	SALT_AS_HEX_FLAG(HAVAL128_4)
+	SALT_AS_HEX_FLAG(HAVAL128_5)
+	SALT_AS_HEX_FLAG(HAVAL160_3)
+	SALT_AS_HEX_FLAG(HAVAL160_4)
+	SALT_AS_HEX_FLAG(HAVAL160_5)
+	SALT_AS_HEX_FLAG(HAVAL192_3)
+	SALT_AS_HEX_FLAG(HAVAL192_4)
+	SALT_AS_HEX_FLAG(HAVAL192_5)
+	SALT_AS_HEX_FLAG(HAVAL224_3)
+	SALT_AS_HEX_FLAG(HAVAL224_4)
+	SALT_AS_HEX_FLAG(HAVAL224_5)
+	SALT_AS_HEX_FLAG(HAVAL256_3)
+	SALT_AS_HEX_FLAG(HAVAL256_4)
+	SALT_AS_HEX_FLAG(HAVAL256_5)
+	SALT_AS_HEX_FLAG(MD2)
+	SALT_AS_HEX_FLAG(PANAMA)
+	SALT_AS_HEX_FLAG(SKEIN224)
+	SALT_AS_HEX_FLAG(SKEIN256)
+	SALT_AS_HEX_FLAG(SKEIN384)
+	SALT_AS_HEX_FLAG(SKEIN512)
+	SALT_AS_HEX_FLAG(SHA3_224)
+	SALT_AS_HEX_FLAG(SHA3_256)
+	SALT_AS_HEX_FLAG(SHA3_384)
+	SALT_AS_HEX_FLAG(SHA3_512)
+	SALT_AS_HEX_FLAG(KECCAK_256)
+	SALT_AS_HEX_FLAG(KECCAK_512)
+	// LARGE_HASH_EDIT_POINT
+
 	{ "MGF_SALT_AS_HEX_TO_SALT2",         MGF_SALT_AS_HEX_TO_SALT2 },
 	{ "MGF_INPBASE64_4x6",				  MGF_INPBASE64_4x6 },
 	{ "MGF_SALT_UNICODE_B4_CRYPT",        MGF_SALT_UNICODE_B4_CRYPT },
@@ -565,18 +395,62 @@ static Dynamic_Str_Flag_t Dynamic_Str_Flag[] =  {
 	{ "MGF_FULL_CLEAN_REQUIRED",          MGF_FULL_CLEAN_REQUIRED },
 	{ NULL, 0 }};
 
+#define SALT_AS_HEX_FLAG2(HASH) \
+	{ "MGF_KEYS_BASE16_IN1_" #HASH,              MGF_KEYS_BASE16_IN1_##HASH }, \
+	{ "MGF_KEYS_BASE16_IN1_Offset_" #HASH,       MGF_KEYS_BASE16_IN1_Offset_##HASH },
+
 static Dynamic_Str_Flag_t Dynamic_Str_sFlag[] =  {
-	{ "MGF_KEYS_INPUT",                   MGF_KEYS_INPUT },
-	{ "MGF_KEYS_CRYPT_IN2",               MGF_KEYS_CRYPT_IN2 },
-	{ "MGF_KEYS_BASE16_IN1",              MGF_KEYS_BASE16_IN1 },
-	{ "MGF_KEYS_BASE16_X86_IN1",          MGF_KEYS_BASE16_X86_IN1 },
-	{ "MGF_KEYS_BASE16_IN1_Offset32",     MGF_KEYS_BASE16_IN1_Offset32 },
-	{ "MGF_KEYS_BASE16_X86_IN1_Offset32", MGF_KEYS_BASE16_X86_IN1_Offset32 },
+	{ "MGF_KEYS_INPUT",                       MGF_KEYS_INPUT },
+	{ "MGF_KEYS_CRYPT_IN2",                   MGF_KEYS_CRYPT_IN2 },
+	{ "MGF_KEYS_BASE16_IN1",                  MGF_KEYS_BASE16_IN1 }, // deprecated (use the _MD5 version)
+	{ "MGF_KEYS_BASE16_IN1_Offset32",         MGF_KEYS_BASE16_IN1_Offset32 },  // deprecated (use the _MD5 version)
+	SALT_AS_HEX_FLAG2(MD5)
+	SALT_AS_HEX_FLAG2(MD4)
+	SALT_AS_HEX_FLAG2(SHA1)
+	SALT_AS_HEX_FLAG2(SHA224)
+	SALT_AS_HEX_FLAG2(SHA256)
+	SALT_AS_HEX_FLAG2(SHA384)
+	SALT_AS_HEX_FLAG2(SHA512)
+	SALT_AS_HEX_FLAG2(GOST)
+	SALT_AS_HEX_FLAG2(WHIRLPOOL)
+	SALT_AS_HEX_FLAG2(Tiger)
+	SALT_AS_HEX_FLAG2(TIGER)
+	SALT_AS_HEX_FLAG2(RIPEMD128)
+	SALT_AS_HEX_FLAG2(RIPEMD160)
+	SALT_AS_HEX_FLAG2(RIPEMD256)
+	SALT_AS_HEX_FLAG2(RIPEMD320)
+	SALT_AS_HEX_FLAG2(HAVAL128_3)
+	SALT_AS_HEX_FLAG2(HAVAL128_4)
+	SALT_AS_HEX_FLAG2(HAVAL128_5)
+	SALT_AS_HEX_FLAG2(HAVAL160_3)
+	SALT_AS_HEX_FLAG2(HAVAL160_4)
+	SALT_AS_HEX_FLAG2(HAVAL160_5)
+	SALT_AS_HEX_FLAG2(HAVAL192_3)
+	SALT_AS_HEX_FLAG2(HAVAL192_4)
+	SALT_AS_HEX_FLAG2(HAVAL192_5)
+	SALT_AS_HEX_FLAG2(HAVAL224_3)
+	SALT_AS_HEX_FLAG2(HAVAL224_4)
+	SALT_AS_HEX_FLAG2(HAVAL224_5)
+	SALT_AS_HEX_FLAG2(HAVAL256_3)
+	SALT_AS_HEX_FLAG2(HAVAL256_4)
+	SALT_AS_HEX_FLAG2(HAVAL256_5)
+	SALT_AS_HEX_FLAG2(MD2)
+	SALT_AS_HEX_FLAG2(PANAMA)
+	SALT_AS_HEX_FLAG2(SKEIN224)
+	SALT_AS_HEX_FLAG2(SKEIN256)
+	SALT_AS_HEX_FLAG2(SKEIN384)
+	SALT_AS_HEX_FLAG2(SKEIN512)
+	SALT_AS_HEX_FLAG2(SHA3_224)
+	SALT_AS_HEX_FLAG2(SHA3_256)
+	SALT_AS_HEX_FLAG2(SHA3_384)
+	SALT_AS_HEX_FLAG2(SHA3_512)
+	SALT_AS_HEX_FLAG2(KECCAK_256)
+	SALT_AS_HEX_FLAG2(KECCAK_512)
+	// LARGE_HASH_EDIT_POINT
+
 	{ "MGF_KEYS_UNICODE_B4_CRYPT",        MGF_KEYS_UNICODE_B4_CRYPT },
-	{ "MGF_PHPassSetup",                  MGF_PHPassSetup },
 	{ "MGF_POSetup",                      MGF_POSetup },
 	{ "MGF_POOR_OMP",                     MGF_POOR_OMP },
-	{ "MGF_FreeBSDMD5Setup",              MGF_FreeBSDMD5Setup },
 	{ "MGF_RAW_SHA1_INPUT",               MGF_RAW_SHA1_INPUT },
 	{ "MGF_KEYS_INPUT_BE_SAFE",           MGF_KEYS_INPUT_BE_SAFE },  // big endian safe, i.e. the input will NEVER get swapped.  Only SHA1 is 'safe'.
 	{ "MGF_SET_INP2LEN32",                MGF_SET_INP2LEN32 }, // this sets the input2 lens (in SSE2) to 32 bytes long, but only in init() call
@@ -595,16 +469,55 @@ static int nPreloadCnt;
 static int nFuncCnt;
 static char SetupName[128], SetupNameID[128];
 static struct cfg_list *gen_source;
+static int ngen_source;
+static char *cp_local_source;
+static char *(*Thin_Convert)(char *Buf, char *ciphertext, int in_load);
 
 extern struct options_main options;
 
+static void add_line(char *cp) {
+	struct cfg_line *pln, *p;
+	int len;
+
+	pln = mem_calloc_tiny(sizeof(struct cfg_line), sizeof(struct cfg_line*));
+	if (gen_source->head == NULL)
+		gen_source->head = pln;
+	p = gen_source->head;
+	while (p->next)
+		p = p->next;
+	if (pln != p)
+		p->next = pln;
+	pln->data = str_alloc_copy(cp);
+	len = strlen(cp);
+	while (len>0) {
+		if (pln->data[len-1] != ' ')
+			break;
+		pln->data[--len] = 0;
+	}
+}
+static void load_script_from_string(int which) {
+	char *cp;
+	if (ngen_source == which)
+		return;
+	gen_source = NULL;
+	if (!cp_local_source || !strlen(cp_local_source))
+		return;
+	cp = strtok(cp_local_source, "\n");
+	if (!cp)
+		return;
+	gen_source = mem_calloc_tiny(sizeof(struct cfg_list), sizeof(struct cfg_list*));
+	while (cp) {
+		add_line(cp);
+		cp = strtok(NULL, "\n");
+	}
+}
 static int load_config(int which) {
 	char SubSection[32];
-	sprintf(SubSection, ":dynamic_%d", which);
-
-	gen_source = cfg_get_list("list.generic", SubSection);
-	if (!gen_source) {
-		sprintf(SubSection, ":md5_gen(%d)", which);
+	if (which >= 6000) {
+		load_script_from_string(which);
+	} else {
+		ngen_source = 0;
+		sprintf(SubSection, ":dynamic_%d", which);
 		gen_source = cfg_get_list("list.generic", SubSection);
 	}
 	return !!gen_source;
@@ -648,23 +561,23 @@ int dynamic_LOAD_PARSER_FUNCTIONS_LoadLINE(struct cfg_line *_line)
 		char *cp;
 		cp = convert_old_name_if_needed(&Line[5]);
 		cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].ciphertext), cp);
+		if (pSetup->pPreloads[nPreloadCnt].ciphertext && Thin_Convert &&
+			strncmp(pSetup->pPreloads[nPreloadCnt].ciphertext, "$dynamic_", 9)) {
+				static char Buf[1024];
+				pSetup->pPreloads[nPreloadCnt].ciphertext = Thin_Convert(Buf, pSetup->pPreloads[nPreloadCnt].ciphertext, 1);
+		}
+		if (!strncmp(pSetup->pPreloads[nPreloadCnt].ciphertext, "$dynamic_6xxx$", 14)) {
+			memmove(pSetup->pPreloads[nPreloadCnt].ciphertext, SetupName, strlen(SetupName));
+		}
 		if (!pSetup->pPreloads[nPreloadCnt].ciphertext ||
 			strncmp(pSetup->pPreloads[nPreloadCnt].ciphertext, SetupName, strlen(SetupName)))
 			return !fprintf(stderr, "Error, invalid test line (wrong generic type):  %s\n", Line);
 		cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].plaintext), cp);
 		pSetup->pPreloads[nPreloadCnt].plaintext = dynamic_Demangle(pSetup->pPreloads[nPreloadCnt].plaintext, NULL);
-#if FMT_MAIN_VERSION > 9
 		pSetup->pPreloads[nPreloadCnt].fields[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#else
-		pSetup->pPreloads[nPreloadCnt].flds[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#endif
 		for (j = 0; j < 10; ++j) {
 			if (j==1) continue;
-#if FMT_MAIN_VERSION > 9
 			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].fields[j]), cp);
-#else
-			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].flds[j]), cp);
-#endif
 		}
 		++nPreloadCnt;
 		return 1;
@@ -681,18 +594,10 @@ int dynamic_LOAD_PARSER_FUNCTIONS_LoadLINE(struct cfg_line *_line)
 			return !fprintf(stderr, "Error, invalid test line (wrong generic type):  %s\n", Line);
 		cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].plaintext), cp);
 		pSetup->pPreloads[nPreloadCnt].plaintext = dynamic_Demangle(pSetup->pPreloads[nPreloadCnt].plaintext, NULL);
-#if FMT_MAIN_VERSION > 9
 		pSetup->pPreloads[nPreloadCnt].fields[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#else
-		pSetup->pPreloads[nPreloadCnt].flds[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#endif
 		for (j = 0; j < 10; ++j) {
 			if (j==1) continue;
-#if FMT_MAIN_VERSION > 9
 			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].fields[j]), cp);
-#else
-			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].flds[j]), cp);
-#endif
 		}
 		++nPreloadCnt;
 		return 1;
@@ -709,18 +614,10 @@ int dynamic_LOAD_PARSER_FUNCTIONS_LoadLINE(struct cfg_line *_line)
 			return !fprintf(stderr, "Error, invalid test line (wrong generic type):  %s\n", Line);
 		cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].plaintext), cp);
 		pSetup->pPreloads[nPreloadCnt].plaintext = dynamic_Demangle(pSetup->pPreloads[nPreloadCnt].plaintext, NULL);
-#if FMT_MAIN_VERSION > 9
 		pSetup->pPreloads[nPreloadCnt].fields[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#else
-		pSetup->pPreloads[nPreloadCnt].flds[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#endif
 		for (j = 0; j < 10; ++j) {
 			if (j==1) continue;
-#if FMT_MAIN_VERSION > 9
 			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].fields[j]), cp);
-#else
-			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].flds[j]), cp);
-#endif
 		}
 		++nPreloadCnt;
 		return 1;
@@ -739,18 +636,10 @@ int dynamic_LOAD_PARSER_FUNCTIONS_LoadLINE(struct cfg_line *_line)
 			return !fprintf(stderr, "Error, invalid test line (wrong generic type):  %s\n", Line);
 		cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].plaintext), cp);
 		pSetup->pPreloads[nPreloadCnt].plaintext = dynamic_Demangle(pSetup->pPreloads[nPreloadCnt].plaintext, NULL);
-#if FMT_MAIN_VERSION > 9
 		pSetup->pPreloads[nPreloadCnt].fields[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#else
-		pSetup->pPreloads[nPreloadCnt].flds[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#endif
 		for (j = 0; j < 10; ++j) {
 			if (j==1) continue;
-#if FMT_MAIN_VERSION > 9
 			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].fields[j]), cp);
-#else
-			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].flds[j]), cp);
-#endif
 		}
 		++nPreloadCnt;
 #endif
@@ -770,18 +659,10 @@ int dynamic_LOAD_PARSER_FUNCTIONS_LoadLINE(struct cfg_line *_line)
 			return !fprintf(stderr, "Error, invalid test line (wrong generic type):  %s\n", Line);
 		cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].plaintext), cp);
 		pSetup->pPreloads[nPreloadCnt].plaintext = dynamic_Demangle(pSetup->pPreloads[nPreloadCnt].plaintext, NULL);
-#if FMT_MAIN_VERSION > 9
 		pSetup->pPreloads[nPreloadCnt].fields[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#else
-		pSetup->pPreloads[nPreloadCnt].flds[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#endif
 		for (j = 0; j < 10; ++j) {
 			if (j==1) continue;
-#if FMT_MAIN_VERSION > 9
 			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].fields[j]), cp);
-#else
-			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].flds[j]), cp);
-#endif
 		}
 		++nPreloadCnt;
 #endif
@@ -801,18 +682,10 @@ int dynamic_LOAD_PARSER_FUNCTIONS_LoadLINE(struct cfg_line *_line)
 			return !fprintf(stderr, "Error, invalid test line (wrong generic type):  %s\n", Line);
 		cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].plaintext), cp);
 		pSetup->pPreloads[nPreloadCnt].plaintext = dynamic_Demangle(pSetup->pPreloads[nPreloadCnt].plaintext, NULL);
-#if FMT_MAIN_VERSION > 9
 		pSetup->pPreloads[nPreloadCnt].fields[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#else
-		pSetup->pPreloads[nPreloadCnt].flds[1] = str_alloc_copy(pSetup->pPreloads[nPreloadCnt].ciphertext);
-#endif
 		for (j = 0; j < 10; ++j) {
 			if (j==1) continue;
-#if FMT_MAIN_VERSION > 9
 			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].fields[j]), cp);
-#else
-			cp = GetFld(&(pSetup->pPreloads[nPreloadCnt].flds[j]), cp);
-#endif
 		}
 		++nPreloadCnt;
 #endif
@@ -947,26 +820,36 @@ char *dynamic_LOAD_PARSER_SIGNATURE(int which)
 	return Sig;
 }
 
-int dynamic_IS_PARSER_VALID(int which)
+int dynamic_IS_PARSER_VALID(int which, int single_lookup_only)
 {
-	struct cfg_line *gen_line;
-	if (!dynamic_LOAD_PARSER_SIGNATURE(which))
-		return 0;
+	static char valid[5001];
+	static int init=0;
 
-	gen_line = gen_source->head;
-	while (gen_line)
-	{
-		if (!strncasecmp(gen_line->data, "ColonChar", 9))
-		{
-			// not sse2, but we do not handle this in the long bench.
-			// we can still bench if we specify JUST this one.
+	if (which < 1000 || which > 5000)
+		return -1;
+	if (single_lookup_only) {
+		// if only loading a single dyna format, then do NOT load the valid array
+		if (!dynamic_LOAD_PARSER_SIGNATURE(which))
 			return 0;
-		}
-		if (strstr(gen_line->data, "MGF_ColonNOTValid"))
-			return 0;  // same as above, ColonChar.
-		gen_line = gen_line->next;
+		return 1;
 	}
-	return 1;
+	if (!init) {
+		extern const struct cfg_section *get_cfg_db();
+		const struct cfg_section *cfg_db;
+
+		cfg_db = get_cfg_db();
+		memset(valid, -1, sizeof(valid));
+		while (cfg_db) {
+			if (!strncasecmp(cfg_db->name, "list.generic:dynamic_", 21)) {
+				int i = atoi(&cfg_db->name[21]);
+				if (i >= 1000 && i < 5000)
+					valid[i] = 1;
+			}
+			cfg_db = cfg_db->next;
+		}
+		init = 1;
+	}
+	return valid[which];
 }
 
 static int Count_Items(char *Key)
@@ -984,16 +867,32 @@ static int Count_Items(char *Key)
 	return Cnt;
 }
 
+struct fmt_main *dynamic_LOCAL_FMT_FROM_PARSER_FUNCTIONS(const char *Script, int *type, struct fmt_main *pFmt, char *(*Convert)(char *Buf, char *ciphertext, int in_load))
+{
+	nPreloadCnt = 0;
+	nFuncCnt = 0;
+
+	cp_local_source = str_alloc_copy((char*)Script);
+	Thin_Convert = Convert;
+	pFmt = dynamic_Register_local_format(type);
+	Thin_Convert = NULL;
+	return pFmt;
+}
+
 int dynamic_LOAD_PARSER_FUNCTIONS(int which, struct fmt_main *pFmt)
 {
 	int ret, cnt;
 	struct cfg_line *gen_line;
+	char tmp = options.loader.field_sep_char;
 
 	nPreloadCnt = 0;
 	nFuncCnt = 0;
 
-	pSetup = mem_calloc_tiny(sizeof(DYNAMIC_Setup), MEM_ALIGN_NONE);
+	// since we switched flags to this size, we need to align to 64 bit,
+	// or we crash on !ALLOW_UNALIGNED
+	pSetup = mem_calloc_tiny(sizeof(DYNAMIC_Setup), sizeof(uint64_t));
 
+	options.loader.field_sep_char = ':';
 	if (!dynamic_LOAD_PARSER_SIGNATURE(which))
 	{
 		if (john_main_process)
@@ -1060,6 +959,7 @@ int dynamic_LOAD_PARSER_FUNCTIONS(int which, struct fmt_main *pFmt)
 
 	ret = dynamic_SETUP(pSetup, pFmt);
 
+	options.loader.field_sep_char = tmp;
 	return ret;
 }
 

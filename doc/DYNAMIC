@@ -291,15 +291,15 @@ dynamic_1019  md5(sha1(sha1(md5($pass))))
 dynamic_1020  md5(sha1(md5($pass)))
 dynamic_1021  md5(sha1(md5(sha1($pass))))
 dynamic_1022  md5(sha1(md5(sha1(md5($pass)))))
-dynamic_1023  sha1($pass) (first 32 bytes)
-dynamic_1024  sha1(md5($pass)) (first 32 bytes)
-dynamic_1025  sha1(md5(md5($pass))) (first 32 bytes)
-dynamic_1026  sha1(sha1($pass))) (first 32 bytes)
-dynamic_1027  sha1(sha1(sha1($pass)))) (first 32 bytes)
-dynamic_1028  sha1(sha1_raw($pass)) (first 32 bytes)
-dynamic_1029  sha256($pass) (first 32 bytes)
-dynamic_1030  Whirlpool($pass) (first 32 bytes)
-dynamic_1031  GOST($pass) (first 32 bytes)
+dynamic_1023  sha1($pass) (hash truncated to length 32)
+dynamic_1024  sha1(md5($pass)) (hash truncated to length 32)
+dynamic_1025  sha1(md5(md5($pass))) (hash truncated to length 32)
+dynamic_1026  sha1(sha1($pass))) (hash truncated to length 32)
+dynamic_1027  sha1(sha1(sha1($pass)))) (hash truncated to length 32)
+dynamic_1028  sha1(sha1_raw($pass)) (hash truncated to length 32)
+dynamic_1029  sha256($pass) (hash truncated to length 32)
+dynamic_1030  Whirlpool($pass) (hash truncated to length 32)
+dynamic_1031  GOST($pass) (hash truncated to length 32)
 dynamic_1300  md5(md5_raw($pass))
 dynamic_1350  md5(md5($s.$p):$s)
 
@@ -337,7 +337,7 @@ examples (this whole list is also found in dynamic.conf).
 # fld0 to fld9 - data from fld1 to fld9 of the input file.
 #
 #   NOTE within the scratch work spaces (input1[] and input2[] arrays), we can only do things like append_keys
-#   append_salt or other things.  Thus, each work space keeps track of each array element (knowing it's contents),
+#   append_salt or other things.  Thus, each work space keeps track of each array element (knowing its contents),
 #   and keeps track of the length.  In the way the scripting works, we can clear them (sets lengths of all
 #   elements to 0, and 'might' clear out the actual memory).  We can append to them (keys, output conversions,
 #   salt, etc) or we can force set their length to 32 ('special' optimization used in conjunction with
@@ -487,23 +487,37 @@ examples (this whole list is also found in dynamic.conf).
 #     and placing the # of bits into the right locations, and the 0x80
 #     trailing byte also).  So this tells dyna to store the data and
 #     intermediate flat, but use the special SSE2 code for this format
-#     that loads from flat.  At the current time, only SHA2 formats
-#     behave like this.  But SHA1 'may' also in the near future. One
-#     REALLY nice thing about doing SSE2 this way, is we are not limited
-#     to a single limb.  All of the sha256 can be done in SSE now. All
-#     of the SHA512 also, with the exception of the final crypt of the
-#     type 87 (sha512(sha512(x).sha512(x))  The final crypt is of 256
-#     bytes. Our internal buffers are ONLY 256 bytes long. Thus, we
-#     can not properly expand them to do the SSE2 (we would need to have
-#     384 byte buffers to do so). So that last step is done using oSSL,
-#     on the 256 byte strings stored (which we CAN work with).
+#     that loads from flat.  Currently, all formats which has SIMD code
+#     have flat buffer behavior.  NOTE most (all except md5/md4 and some
+#     for sha1), ONLY have the flat buffer code.  These other 3 formats
+#     do have custom 'mixed' coding.
+#     One really nice thing about doing SIMD this way is the single limb
+#     limit has been removed.  The SIMD code is currently in MD4/5, SHA1,
+#     and 32 bit SHA2 (SHA224/SHA256). The SIMD code has not been done
+#     for the flat SHA384/SHA512 code yet.
 #
 #  Flag=MGF_INPBASE64
 #     If the hashes are in base-64 (such as phpass), then use this
 #     flag.  Note, the base 64 'format' used is that of phpass.  If there
 #     are other orderings, then this will not work.  I know of no formats
 #     in use, other than phpass (phpbb, wordpress, etc) which use base-64
-#     for md5.
+#     for md5.  This is actually the same format as CryptBS in base64conv
+#     utility.  This has been improved now. It should work for any standard
+#     length hash (from 16 bytes up to 64 bytes).  The only part of the
+#     hash that is base-64 decoded is within the binary hash value itself.
+#     dynamic does not handle base-64 decoding within any part of the salt.
+#
+#  Flag=MGF_INPBASE64b
+#     This is like the MGF_INPBASE64 flag, BUT the encoding is in BE format
+#     crypt.  This is the same as Crypt encoding in base64conv utility
+#
+#  Flag=MGF_INPBASE64m
+#     This is like the MGF_INPBASE64 flag, BUT the encoding is in MIME.
+#     This is the same as MIME encoding in base64conv utility. NOTE, the
+#     hash can end with optional '=' place holding characters. These will
+#     be stripped off, in the prepare/split functions, to canonicalize the
+#     value of the hash to be NON-equal padded.  But an input file can have
+#     the '=' padding or not (or even mixed) and still process properly.
 #
 #  Flag=MGF_INPBASE64_4x6
 #     If this flag is set, then the input will be base-64, where 4 bytes are
@@ -548,10 +562,6 @@ examples (this whole list is also found in dynamic.conf).
 #     This flag will case the format to 'start' in uppercase base-16
 #     conversion mode, so that any initial key loading will also be
 #     done to the using unicode conversions.
-#
-#  Flag=MGF_HDAA_SALT
-#     Special salt loading for the HDAA format dynamic_21.
-#     Not useful for anything else.
 #
 #  MGF_FLD0, MGF_FLD1, MGF_FLD2, ... ,MGF_FLD9
 #     If any of the fields of the file are part of the format (and
@@ -932,7 +942,7 @@ examples (this whole list is also found in dynamic.conf).
 ####################
 #
 # These other large hash types, have been built like the SHA1 (listed above). They will have
-# the same 8 function primatives, and be named exactly the same as the SHA1, except they
+# the same 8 function primitives, and be named exactly the same as the SHA1, except they
 # will have the crypt in the function name.  The current hashes supported are:
 #     SHA224, SHA256, SHA384, SHA512, GOST, WHIRLPOOL.
 #     NOTE Whirlpool is ONLY supported in new versions of OpenSSL, so if the version of oSSL
@@ -961,7 +971,7 @@ examples (this whole list is also found in dynamic.conf).
 # Controlling the output of 'large' crypts.
 ####################
 #
-# All of the 'large' crypts, have simple function primatives. These will perform the
+# All of the 'large' crypts, have simple function primitives. These will perform the
 # crypt, and then write output to one of the 2 buffers. The output can be appeneded,
 # or overwritten.  The format this output is done in CAN be controlled. The output
 # formats are:  base-16  (0-9 and a-f), base-16 upcase (0-9 and A-F), base-64 (MIME)
@@ -1042,13 +1052,13 @@ examples (this whole list is also found in dynamic.conf).
 #
 #  TestD= Allows placing a test case that will ONLY load, if -DDEBUG build of
 #    JtR is done (for testing).  At this time, the REALLY long password hashes
-#    are being added with TestD=  so that the timing of the formats will not be 
+#    are being added with TestD=  so that the timing of the formats will not be
 #    impacted, but so that a debugging build can be done, and the extra long
 #    test strings will still be there and be tested.
 #
 #  TestF= Allows placing a test case that will NEVER be loaded if this was an
 #    MMX or SSE build (Only load for 'flat' builds, like oSSL only).
-#   
+#
 #################
 #
 # The testing line is simply of this format:
@@ -2645,41 +2655,6 @@ Func=DynamicFunc__crypt_md5_in2_to_out1
 Test=$dynamic_1059$ef1b8ee3ad8690fd1678093588727529:test1
 Test=$dynamic_1059$18a7e5f289730525111f7b65cb223506:thatsworking
 Test=$dynamic_1059$01a0359d0cabbf49a0b0a8a941c7f5ab:test3
-
-
-
-##############################################################################
-# digest authentication scheme :
-#  h1 = md5(user:realm:password)
-#  h2 = md5(method:digestURI)
-#  response = h3 = md5(h1:nonce:nonceCount:ClientNonce:qop:h2)
-#
-# the 'special' salt sets 32space:nonce:nonceCount:ClientNonce:qop:h2
-# Also, this salt sets the first 5 bytes to be a growing text number,
-# so that salt_hash works properly.
-##############################################################################
-[List.Generic:dynamic_1060]
-Expression=dynamic_1060: HDAA )
-Flag=MGF_HDAA_SALT
-Flag=MGF_FLD2
-Flag=MGF_FLD3
-Flag=MGF_FLD4
-Flag=MGF_USERNAME
-Func=DynamicFunc__clean_input
-Func=DynamicFunc__append_userid
-Func=DynamicFunc__append_input1_from_CONST1
-Func=DynamicFunc__append_fld2
-Func=DynamicFunc__append_input1_from_CONST1
-Func=DynamicFunc__append_keys
-Func=DynamicFunc__crypt_md5
-Func=DynamicFunc__SSEtoX86_switch_output1
-Func=DynamicFunc__clean_input_kwik
-Func=DynamicFunc__append_salt
-Func=DynamicFunc__overwrite_from_last_output_as_base16_no_size_fix
-Func=DynamicFunc__crypt_md5
-Test=$dynamic_1060$679066476e67b5c7c4e88f04be567f8b$8c12bd8f728afe56d45a0ce846b70e5a$$Uuser$$F2myrealm$$F3GET$/$$F400000001$4b61913cec32e2c9$auth:nocode
-Test=$dynamic_1060$faa6cb7d676e5b7c17fcbf966436aa0c$af32592775d27b1cd06356b3a0db9ddf$$Umoi$$F2myrealm$$F3GET$/$$F400000001$8e1d49754a25aea7$auth:kikou
-CONST1=:
 
 
 [List.Generic:dynamic_1090]

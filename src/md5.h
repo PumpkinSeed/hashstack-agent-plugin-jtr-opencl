@@ -26,21 +26,19 @@ typedef unsigned int MD5_u32plus;
 
 #else
 
-#ifndef USING_ICC_S_FILE
 #define MD5_Init john_MD5_Init
 #define MD5_Update john_MD5_Update
 #define MD5_Final john_MD5_Final
-#endif
 
 typedef struct {
+	MD5_u32plus A, B, C, D;
 	MD5_u32plus lo, hi;
-	MD5_u32plus a, b, c, d;
 	unsigned char buffer[64];
 	MD5_u32plus block[16];
 } MD5_CTX;
 
 extern void MD5_Init(MD5_CTX *ctx);
-extern void MD5_Update(MD5_CTX *ctx, void *data, unsigned long size);
+extern void MD5_Update(MD5_CTX *ctx, const void *data, unsigned long size);
 extern void MD5_PreFinal(MD5_CTX *ctx);
 extern void MD5_Final(unsigned char *result, MD5_CTX *ctx);
 #endif /* HAVE_LIBSSL */

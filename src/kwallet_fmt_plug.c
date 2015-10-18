@@ -30,7 +30,9 @@ john_register_one(&fmt_kwallet);
 #include "sha.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               64
+#endif
 #endif
 #include "memdbg.h"
 
@@ -100,12 +102,14 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	ctcopy += 9;
 	if ((p = strtokm(ctcopy, "$")) == NULL)	/* ctlen */
 		goto err;
+	if (!isdec(p))
+		goto err;
 	res = atoi(p);
 	if (!res)
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL)	/* ct */
 		goto err;
-	if(strlen(p) != res * 2)
+	if (hexlenl(p) != res*2)
 		goto err;
 	MEM_FREE(keeptr);
 	return 1;
@@ -118,22 +122,23 @@ err:
 static void *get_salt(char *ciphertext)
 {
 	char *ctcopy = strdup(ciphertext);
+	static struct custom_salt *salt;
 	char *keeptr = ctcopy;
 	int i;
 	char *p;
 	ctcopy += 9;	/* skip over "$kwallet$" */
-	cur_salt = mem_calloc_tiny(sizeof(struct custom_salt), MEM_ALIGN_WORD);
+	if (!salt) salt = mem_calloc_tiny(sizeof(struct custom_salt), MEM_ALIGN_WORD);
+	memset(salt, 0, sizeof(*salt));
 	p = strtokm(ctcopy, "$");
-	cur_salt->ctlen = atoi(p);
+	salt->ctlen = atoi(p);
 	p = strtokm(NULL, "$");
-	for (i = 0; i < cur_salt->ctlen; i++)
-		cur_salt->ct[i] = atoi16[ARCH_INDEX(p[i * 2])] * 16
+	for (i = 0; i < salt->ctlen; i++)
+		salt->ct[i] = atoi16[ARCH_INDEX(p[i * 2])] * 16
 			+ atoi16[ARCH_INDEX(p[i * 2 + 1])];
 	MEM_FREE(keeptr);
-	return (void *)cur_salt;
+	return (void *)salt;
 }
 
-#define MIN(x,y) ((x) < (y) ? (x) : (y))
 static void password2hash(const char *password, unsigned char *hash, int *key_size)
 {
 	SHA_CTX ctx;
@@ -313,9 +318,7 @@ struct fmt_main fmt_kwallet = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_NOT_EXACT,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		kwallet_tests
 	}, {
 		init,
@@ -326,9 +329,7 @@ struct fmt_main fmt_kwallet = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

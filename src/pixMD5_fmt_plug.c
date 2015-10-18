@@ -27,7 +27,7 @@ john_register_one(&fmt_pixMD5);
 #define FORMAT_NAME		"Cisco PIX"
 #define ALGORITHM_NAME		"?" /* filled in by md5-gen */
 #define BENCHMARK_COMMENT	""
-#define BENCHMARK_LENGTH		0
+#define BENCHMARK_LENGTH		-1
 
 // set PLAINTEXT_LENGTH to 0, so dyna will set this  (note, 16 was right, but just let dyna set it)
 #define PLAINTEXT_LENGTH		0
@@ -105,9 +105,7 @@ struct fmt_main fmt_pixMD5 = {
 		// here, but will be reset within our init() function.
 		FORMAT_LABEL, FORMAT_NAME, ALGORITHM_NAME, BENCHMARK_COMMENT, BENCHMARK_LENGTH,
 		0, PLAINTEXT_LENGTH, BINARY_SIZE, BINARY_ALIGN, SALT_SIZE, SALT_ALIGN, 1, 1, FMT_CASE | FMT_8_BIT | FMT_DYNAMIC,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		pixmd5_tests
 	},
 	{

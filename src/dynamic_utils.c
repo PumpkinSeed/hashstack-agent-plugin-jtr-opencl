@@ -25,7 +25,18 @@
 
 #include <string.h>
 
+#if AC_BUILT
+#include "autoconfig.h"
+#endif
+
 #include "arch.h"
+
+#if !FAST_FORMATS_OMP
+#ifdef _OPENMP
+#  define FORCE_THREAD_MD5_body
+#endif
+#undef _OPENMP
+#endif
 
 #include "misc.h"
 #include "common.h"
@@ -33,6 +44,9 @@
 #include "config.h"
 #include "md5.h"
 #include "dynamic.h"
+#ifndef UNICODE_NO_OPTIONS
+#include "options.h"
+#endif
 #include "memdbg.h"
 
 #ifndef DYNAMIC_DISABLED
@@ -46,14 +60,9 @@ void dynamic_DISPLAY_ALL_FORMATS()
 		char Type[14], *cp;
 		if (!sz)
 			break;
-		strncpy(Type, sz, sizeof(Type));
-		Type[13] = 0;
+		strnzcpy(Type, sz, sizeof(Type));
 		cp = strchr(Type, ':');
 		if (cp) *cp = 0;
-#ifndef DEBUG
-		if (cfg_get_bool(SECTION_DISABLED, SUBSECTION_FORMATS, Type, 0))
-			continue;
-#endif
 		printf ("Format = %s%s  type = %s\n", Type, strlen(Type)<10?" ":"", sz);
 	}
 
@@ -69,9 +78,7 @@ void dynamic_DISPLAY_ALL_FORMATS()
 	for (i = 1000; i < 10000; ++i)
 	{
 		char *sz = dynamic_LOAD_PARSER_SIGNATURE(i);
-		if (sz &&
-		    // dynamic_IS_PARSER_VALID(i)) // this would include "reserved" formats
-		    dynamic_IS_VALID(i, 0) == 1) // skip "reserved" formats & disabled
+		if (sz && dynamic_IS_VALID(i, 0) == 1)
 			printf ("UserFormat = dynamic_%d  type = %s\n", i, sz);
 	}
 }
@@ -172,7 +179,7 @@ char *dynamic_FIX_SALT_TO_HEX(char *ciphertext) {
 		// ok, we are going to convert to a 'HEX'  The length is length of ciphertext, the null, the HEX$ and 2 bytes per char of salt string.
 		char *cpx, *cpNew = mem_alloc_tiny(strlen(ciphertext) + 1 + 4 + strlen(cp), MEM_ALIGN_NONE);
 		cpx = cpNew;
-		// put the hash, including first '$' into the ouput string, AND the starting HEX$
+		// put the hash, including first '$' into the output string, AND the starting HEX$
 		cpx += sprintf(cpNew, "%*.*sHEX$", (int)(cp-ciphertext), (int)(cp-ciphertext), ciphertext);
 		while (*cp)
 			cpx += sprintf(cpx, "%02x", (unsigned char)(*cp++));

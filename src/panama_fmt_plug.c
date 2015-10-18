@@ -31,9 +31,15 @@ static int omp_t = 1;
 // 128 - 2099k
 // 256 - 2204k *** set to this level
 // 512 - 2203k
-// 1k  - 2124k 
+// 1k  - 2124k
+#ifndef OMP_SCALE
+#ifdef __MIC__
+#define OMP_SCALE  8
+#else
 #define OMP_SCALE  256
-#endif
+#endif // __MIC__
+#endif // OMP_SCALE
+#endif // _OPENMP
 #include "memdbg.h"
 
 #define FORMAT_LABEL		"Panama"
@@ -54,6 +60,12 @@ static int omp_t = 1;
 static struct fmt_tests panama__tests[] = {
 	{"049d698307d8541f22870dfa0a551099d3d02bc6d57c610a06a4585ed8d35ff8", "T"},
 	{"$panama$049d698307d8541f22870dfa0a551099d3d02bc6d57c610a06a4585ed8d35ff8", "T"},
+	{"a2a70386b81fb918be17f00ff3e3b376a0462c4dc2eec7f2c63202c8874c037d", "abc"},
+	{"$panama$a2a70386b81fb918be17f00ff3e3b376a0462c4dc2eec7f2c63202c8874c037d", "abc"},
+	{"017686a23c4af3b9c074888ec76f893945d541cd17ee8011b2bd0ee2d581db34", "john"},
+	{"$panama$017686a23c4af3b9c074888ec76f893945d541cd17ee8011b2bd0ee2d581db34", "john"},
+	{"3919248ab4c8dea4843663c532db9823169a71d03b0f918082c9f53748dea1e8", "passweird"},
+	{"$panama$3919248ab4c8dea4843663c532db9823169a71d03b0f918082c9f53748dea1e8", "passweird"},
 	{NULL}
 };
 
@@ -68,11 +80,15 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_out = mem_calloc_tiny(sizeof(*crypt_out) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_key = mem_calloc(sizeof(*saved_key), self->params.max_keys_per_crypt);
+	crypt_out = mem_calloc(sizeof(*crypt_out), self->params.max_keys_per_crypt);
 }
 
+static void done(void)
+{
+	MEM_FREE(crypt_out);
+	MEM_FREE(saved_key);
+}
 
 static int valid(char *ciphertext, struct fmt_main *self)
 {
@@ -82,12 +98,8 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 	if (!strncmp(p, FORMAT_TAG, TAG_LENGTH))
 		p += TAG_LENGTH;
-	if (strlen(p) != BINARY_SIZE*2)
+	if (hexlenl(p) != BINARY_SIZE*2)
 		return 0;
-	while(*p)
-		if(atoi16[ARCH_INDEX(*p++)]==0x7f)
-			return 0;
-
 	return 1;
 }
 
@@ -115,13 +127,13 @@ static void *get_binary(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
@@ -148,7 +160,7 @@ static int cmp_all(void *binary, int count)
 #ifdef _OPENMP
 	for (; index < count; index++)
 #endif
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -203,22 +215,18 @@ struct fmt_main fmt_panama_ = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		panama__tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		prepare,
 		valid,
 		fmt_default_split,
 		get_binary,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

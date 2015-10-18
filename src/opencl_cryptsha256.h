@@ -24,7 +24,7 @@
 #define PLAINTEXT_ARRAY         (PLAINTEXT_LENGTH / 4)
 #define SEED                    1024
 #define STEP                    0
-#define HASH_LOOPS              ((7*3*2) * 4)
+#define HASH_LOOPS              (7*3*2)
 
 #define KEYS_PER_CORE_CPU       128
 #define KEYS_PER_CORE_GPU       1
@@ -58,7 +58,7 @@ typedef struct {
     uint32_t                    total;
     uint32_t                    buflen;
     buffer_32                   buffer[16];     //512 bits
-#if cpu(DEVICE_INFO)
+#if __CPU__
     uint64_t                    safety_trail;   //To avoid memory override
 #endif
 } sha256_ctx;

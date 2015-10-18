@@ -67,7 +67,6 @@ john_register_one(&fmt_cryptsha512);
 
 #include "arch.h"
 
-//#undef SIMD_COEF_32
 //#undef SIMD_COEF_64
 
 #include "sha2.h"
@@ -79,10 +78,12 @@ john_register_one(&fmt_cryptsha512);
 #include "common.h"
 #include "formats.h"
 #include "johnswap.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 
 #ifdef _OPENMP
+#ifndef OMP_SCALE
 #define OMP_SCALE			16
+#endif
 #include <omp.h>
 #endif
 
@@ -121,7 +122,11 @@ john_register_one(&fmt_cryptsha512);
 #ifdef SIMD_COEF_64
 #define ALGORITHM_NAME          SHA512_ALGORITHM_NAME
 #else
-#define ALGORITHM_NAME			"64/" ARCH_BITS_STR " " SHA2_LIB
+#if ARCH_BITS >= 64
+#define ALGORITHM_NAME         "64/" ARCH_BITS_STR " " SHA2_LIB
+#else
+#define ALGORITHM_NAME         "32/" ARCH_BITS_STR " " SHA2_LIB
+#endif
 #endif
 
 // 79 is max length we can do in 2 SIMD limbs, so just make it 79 always.
@@ -131,10 +136,11 @@ john_register_one(&fmt_cryptsha512);
 #define SALT_SIZE			sizeof(struct saltstruct)
 #define SALT_ALIGN			4
 
-#define MIN_KEYS_PER_CRYPT		1
 #ifdef SIMD_COEF_64
-#define MAX_KEYS_PER_CRYPT		SIMD_COEF_64
+#define MIN_KEYS_PER_CRYPT		(SIMD_COEF_64*SIMD_PARA_SHA512)
+#define MAX_KEYS_PER_CRYPT		(SIMD_COEF_64*SIMD_PARA_SHA512)
 #else
+#define MIN_KEYS_PER_CRYPT		1
 #define MAX_KEYS_PER_CRYPT		1
 #endif
 
@@ -145,11 +151,7 @@ john_register_one(&fmt_cryptsha512);
 #define __CRYPTSHA512_CREATE_PROPER_TESTS_ARRAY__
 #include "cryptsha512_common.h"
 
-#ifndef SIMD_COEF_64
-#define BLKS 1
-#else
-#define BLKS SIMD_COEF_64
-#endif
+#define BLKS MAX_KEYS_PER_CRYPT
 
 /* This structure is 'pre-loaded' with the keyspace of all possible crypts which  */
 /* will be performed WITHIN the inner loop.  There are 8 possible buffers that    */
@@ -194,7 +196,6 @@ typedef struct cryptloopstruct_t {
 static int (*saved_len);
 static char (*saved_key)[PLAINTEXT_LENGTH + 1];
 static ARCH_WORD_32 (*crypt_out)[BINARY_SIZE / sizeof(ARCH_WORD_32)];
-static int max_crypts;
 
 /* these 2 values are used in setup of the cryptloopstruct, AND to do our SHA512_Init() calls, in the inner loop */
 static const unsigned char padding[256] = { 0x80, 0 /* 0,0,0,0.... */ };
@@ -212,6 +213,8 @@ static struct saltstruct {
 static void init(struct fmt_main *self)
 {
 	int omp_t = 1;
+	int max_crypts;
+
 #ifdef _OPENMP
 	omp_t = omp_get_max_threads();
 	omp_t *= OMP_SCALE;
@@ -232,13 +235,13 @@ static void done(void)
 	MEM_FREE(saved_len);
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static void set_key(char *key, int index)
 {
@@ -578,7 +581,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 #ifdef SIMD_COEF_64
 	// group based upon size splits.
-	MixOrder = mem_calloc((count+6*SIMD_COEF_64), sizeof(int));
+	MixOrder = mem_calloc((count+6*MAX_KEYS_PER_CRYPT), sizeof(int));
 	{
 		static const int lens[17][6] = {
 			{0,24,48,88,89,90},  //  0 byte salt
@@ -606,7 +609,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 				if (saved_len[index] >= lens[cur_salt->len][j] && saved_len[index] < lens[cur_salt->len][j+1])
 					MixOrder[tot_todo++] = index;
 			}
-			while (tot_todo & (SIMD_COEF_64-1))
+			while (tot_todo % MAX_KEYS_PER_CRYPT)
 				MixOrder[tot_todo++] = count;
 		}
 	}
@@ -636,14 +639,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		char *cp;
 		char p_bytes[PLAINTEXT_LENGTH+1];
 		char s_bytes[PLAINTEXT_LENGTH+1];
-		//JTR_ALIGN(MEM_ALIGN_SIMD) cryptloopstruct crypt_struct;
-		// JTR_ALIGN(x) fails (compiler bug), for cygwin32 builds. So we instead
-		// align by hand, at runtime using flat buffers on the stack.
 		char tmp_cls[sizeof(cryptloopstruct)+MEM_ALIGN_SIMD];
 		cryptloopstruct *crypt_struct;
 #ifdef SIMD_COEF_64
-		//JTR_ALIGN(MEM_ALIGN_SIMD) ARCH_WORD_64 sse_out[64];
-		char tmp_sse_out[8*SIMD_COEF_64*8+MEM_ALIGN_SIMD];
+		char tmp_sse_out[8*MAX_KEYS_PER_CRYPT*8+MEM_ALIGN_SIMD];
 		ARCH_WORD_64 *sse_out;
 		sse_out = (ARCH_WORD_64 *)mem_align(tmp_sse_out, MEM_ALIGN_SIMD);
 #endif
@@ -738,20 +737,20 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		for (cnt = 1; ; ++cnt) {
 			if (crypt_struct->datlen[idx]==256) {
 				unsigned char *cp = crypt_struct->bufs[0][idx];
-				SSESHA512body((__m128i *)cp, sse_out, NULL, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK);
-				SSESHA512body((__m128i *)&cp[128], sse_out, sse_out, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK|SSEi_RELOAD);
+				SIMDSHA512body((__m128i *)cp, sse_out, NULL, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK);
+				SIMDSHA512body((__m128i *)&cp[128], sse_out, sse_out, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK|SSEi_RELOAD);
 			} else {
 				unsigned char *cp = crypt_struct->bufs[0][idx];
-				SSESHA512body((__m128i *)cp, sse_out, NULL, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK);
+				SIMDSHA512body((__m128i *)cp, sse_out, NULL, SSEi_FLAT_IN|SSEi_2BUF_INPUT_FIRST_BLK);
 			}
 			if (cnt == cur_salt->rounds)
 				break;
 			{
 				int j, k;
-				for (k = 0; k < SIMD_COEF_64; ++k) {
+				for (k = 0; k < MAX_KEYS_PER_CRYPT; ++k) {
 					ARCH_WORD_64 *o = (ARCH_WORD_64 *)crypt_struct->cptr[k][idx];
 					for (j = 0; j < 8; ++j)
-						*o++ = JOHNSWAP64(sse_out[j*SIMD_COEF_64+k]);
+						*o++ = JOHNSWAP64(sse_out[j*SIMD_COEF_64+(k&(SIMD_COEF_64-1))+k/SIMD_COEF_64*8*SIMD_COEF_64]);
 				}
 			}
 			if (++idx == 42)
@@ -759,10 +758,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		}
 		{
 			int j, k;
-			for (k = 0; k < SIMD_COEF_64; ++k) {
+			for (k = 0; k < MAX_KEYS_PER_CRYPT; ++k) {
 				ARCH_WORD_64 *o = (ARCH_WORD_64 *)crypt_out[MixOrder[index+k]];
 				for (j = 0; j < 8; ++j)
-					*o++ = JOHNSWAP64(sse_out[j*SIMD_COEF_64+k]);
+					*o++ = JOHNSWAP64(sse_out[j*SIMD_COEF_64+(k&(SIMD_COEF_64-1))+k/SIMD_COEF_64*8*SIMD_COEF_64]);
 			}
 		}
 #else
@@ -848,6 +847,9 @@ static void *get_salt(char *ciphertext)
 
 	for (len = 0; ciphertext[len] != '$'; len++);
 
+	if (len > SALT_LENGTH)
+		len = SALT_LENGTH;
+
 	memcpy(out.salt, ciphertext, len);
 	out.len = len;
 	return &out;
@@ -857,7 +859,7 @@ static int cmp_all(void *binary, int count)
 {
 	int index = 0;
 	for (; index < count; index++)
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], ARCH_SIZE))
 			return 1;
 	return 0;
 }
@@ -870,6 +872,14 @@ static int cmp_one(void *binary, int index)
 static int cmp_exact(char *source, int index)
 {
 	return 1;
+}
+
+static unsigned int sha512crypt_iterations(void *salt)
+{
+	struct saltstruct *sha512crypt_salt;
+
+	sha512crypt_salt = salt;
+	return (unsigned int)sha512crypt_salt->rounds;
 }
 
 // Public domain hash function by DJ Bernstein
@@ -885,17 +895,6 @@ static int salt_hash(void *salt)
 
 	return hash & (SALT_HASH_SIZE - 1);
 }
-
-#if FMT_MAIN_VERSION > 11
-/* iteration count as tunable cost parameter */
-static unsigned int sha512crypt_iterations(void *salt)
-{
-	struct saltstruct *sha512crypt_salt;
-
-	sha512crypt_salt = salt;
-	return (unsigned int)sha512crypt_salt->rounds;
-}
-#endif
 
 struct fmt_main fmt_cryptsha512 = {
 	{
@@ -913,11 +912,9 @@ struct fmt_main fmt_cryptsha512 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		tests
 	}, {
 		init,
@@ -928,11 +925,9 @@ struct fmt_main fmt_cryptsha512 = {
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			sha512crypt_iterations,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

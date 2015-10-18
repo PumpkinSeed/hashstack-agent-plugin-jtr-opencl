@@ -19,21 +19,35 @@ john_register_one(&fmt_rawMD5);
 
 #include "md5.h"
 #include "common.h"
+#include "johnswap.h"
 #include "formats.h"
 
 #if !FAST_FORMATS_OMP
 #undef _OPENMP
 #endif
 
+//#undef SIMD_COEF_32
+//#undef SIMD_PARA_MD5
+
+/*
+ * Only effective for SIMD.
+ * Undef to disable reversing steps for benchmarking.
+ */
+#define REVERSE_STEPS
+
 #ifdef _OPENMP
 #ifdef SIMD_COEF_32
+#ifndef OMP_SCALE
 #define OMP_SCALE               256 // core i7
+#endif
 #else
+#ifndef OMP_SCALE
 #define OMP_SCALE				2048
+#endif
 #endif
 #include <omp.h>
 #endif
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 #include "memdbg.h"
 
 #define FORMAT_LABEL			"Raw-MD5"
@@ -41,8 +55,7 @@ john_register_one(&fmt_rawMD5);
 #define ALGORITHM_NAME			"MD5 " MD5_ALGORITHM_NAME
 
 #ifdef SIMD_COEF_32
-#  define NBKEYS				(SIMD_COEF_32 * MD5_SSE_PARA)
-#  define DO_MMX_MD5(in, out)	SSEmd5body(in, (unsigned int*)out, NULL, SSEi_MIXED_IN)
+#define NBKEYS				(SIMD_COEF_32 * SIMD_PARA_MD5)
 #endif
 
 #define BENCHMARK_COMMENT		""
@@ -54,7 +67,7 @@ john_register_one(&fmt_rawMD5);
 #define CIPHERTEXT_LENGTH		32
 
 #define DIGEST_SIZE				16
-#define BINARY_SIZE				16 // source()
+#define BINARY_SIZE				16
 #define BINARY_ALIGN			4
 #define SALT_SIZE				0
 #define SALT_ALIGN				1
@@ -105,6 +118,8 @@ static void init(struct fmt_main *self)
 	self->params.min_keys_per_crypt *= omp_t;
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
+#else
+	self->params.max_keys_per_crypt *= 10;
 #endif
 #ifndef SIMD_COEF_32
 	saved_len = mem_calloc(self->params.max_keys_per_crypt,
@@ -135,72 +150,98 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	char *p, *q;
 
 	p = ciphertext;
-	if (!strncmp(p, FORMAT_TAG, TAG_LENGTH))
+	if (*p == '$' && !strncmp(p, FORMAT_TAG, TAG_LENGTH))
 		p += TAG_LENGTH;
 
 	q = p;
-	while (atoi16[ARCH_INDEX(*q)] != 0x7F) {
-		if (*q >= 'A' && *q <= 'F') /* support lowercase only */
-			return 0;
+	while (atoi16l[ARCH_INDEX(*q)] != 0x7F)
 		q++;
-	}
 	return !*q && q - p == CIPHERTEXT_LENGTH;
 }
 
 static char *split(char *ciphertext, int index, struct fmt_main *self)
 {
-	static char out[TAG_LENGTH + CIPHERTEXT_LENGTH + 1];
+	static char out[TAG_LENGTH + CIPHERTEXT_LENGTH + 1] = FORMAT_TAG;
 
-	if (!strncmp(ciphertext, FORMAT_TAG, TAG_LENGTH))
+	if (ciphertext[0] == '$' &&
+	    !strncmp(ciphertext, FORMAT_TAG, TAG_LENGTH))
 		return ciphertext;
 
-	memcpy(out, FORMAT_TAG, TAG_LENGTH);
-	memcpy(out + TAG_LENGTH, ciphertext, CIPHERTEXT_LENGTH + 1);
+	memcpy(out + TAG_LENGTH, ciphertext, CIPHERTEXT_LENGTH);
+
 	return out;
 }
 
 static void *get_binary(char *ciphertext)
 {
-	static unsigned char *out;
-	char *p;
-	int i;
+	static union {
+		unsigned long dummy;
+		unsigned int i[DIGEST_SIZE/sizeof(unsigned int)];
+	} _out;
+	unsigned int *out = _out.i;
+	unsigned int i;
+	unsigned int temp;
 
-	if (!out) out = mem_alloc_tiny(DIGEST_SIZE, MEM_ALIGN_WORD);
+	ciphertext += TAG_LENGTH;
+	for (i=0; i<4; i++)
+	{
+		temp  = (atoi16[ARCH_INDEX(ciphertext[i*8+0])])<<4;
+		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+1])]);
 
-	p = ciphertext + TAG_LENGTH;
-	for (i = 0; i < DIGEST_SIZE; i++) {
-		out[i] =
-		    (atoi16[ARCH_INDEX(*p)] << 4) |
-		    atoi16[ARCH_INDEX(p[1])];
-		p += 2;
+		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+2])])<<12;
+		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+3])])<<8;
+
+		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+4])])<<20;
+		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+5])])<<16;
+
+		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+6])])<<28;
+		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+7])])<<24;
+
+#if ARCH_LITTLE_ENDIAN
+		out[i]=temp;
+#else
+		out[i]=JOHNSWAP(temp);
+#endif
 	}
+
+#if SIMD_COEF_32 && defined(REVERSE_STEPS)
+	md5_reverse(out);
+#endif
+
+	return out;
+}
+
+static char *source(char *source, void *binary)
+{
+	static char out[TAG_LENGTH + CIPHERTEXT_LENGTH + 1] = FORMAT_TAG;
+	ARCH_WORD_32 b[4];
+	char *p;
+	int i, j;
+
+	memcpy(b, binary, sizeof(b));
+
+#if SIMD_COEF_32 && defined(REVERSE_STEPS)
+	md5_unreverse(b);
+#endif
+
+	p = &out[TAG_LENGTH];
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 8; j++)
+			*p++ = itoa16[(b[i] >> ((j ^ 1) * 4)) & 0xf];
 
 	return out;
 }
 
 #ifdef SIMD_COEF_32
-#define HASH_OFFSET (index&(SIMD_COEF_32-1))+(((unsigned int)index%NBKEYS)/SIMD_COEF_32)*SIMD_COEF_32*4
-static int get_hash_0(int index) { return crypt_key[index/NBKEYS][HASH_OFFSET] & 0xf; }
-static int get_hash_1(int index) { return crypt_key[index/NBKEYS][HASH_OFFSET] & 0xff; }
-static int get_hash_2(int index) { return crypt_key[index/NBKEYS][HASH_OFFSET] & 0xfff; }
-static int get_hash_3(int index) { return crypt_key[index/NBKEYS][HASH_OFFSET] & 0xffff; }
-static int get_hash_4(int index) { return crypt_key[index/NBKEYS][HASH_OFFSET] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_key[index/NBKEYS][HASH_OFFSET] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_key[index/NBKEYS][HASH_OFFSET] & 0x7ffffff; }
-#else
-static int get_hash_0(int index) { return crypt_key[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_key[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_key[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_key[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_key[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_key[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_key[index][0] & 0x7ffffff; }
-#endif
-
-#ifdef SIMD_COEF_32
 static void set_key(char *_key, int index)
 {
+#if ARCH_ALLOWS_UNALIGNED
 	const ARCH_WORD_32 *key = (ARCH_WORD_32*)_key;
+#else
+	char buf_aligned[PLAINTEXT_LENGTH + 1] JTR_ALIGN(sizeof(uint32_t));
+	const ARCH_WORD_32 *key = (uint32_t*)(is_aligned(_key, sizeof(uint32_t)) ?
+	                                      _key : strcpy(buf_aligned, _key));
+#endif
 	ARCH_WORD_32 *keybuffer = &((ARCH_WORD_32*)saved_key)[(index&(SIMD_COEF_32-1)) + (unsigned int)index/SIMD_COEF_32*MD5_BUF_SIZ*SIMD_COEF_32];
 	ARCH_WORD_32 *keybuf_word = keybuffer;
 	unsigned int len;
@@ -277,20 +318,24 @@ static char *get_key(int index)
 }
 #endif
 
+#ifndef REVERSE_STEPS
+#undef SSEi_REVERSE_STEPS
+#define SSEi_REVERSE_STEPS 0
+#endif
+
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
 	const int count = *pcount;
 	int index = 0;
 
-#ifdef _OPENMP
 	int loops = (count + MAX_KEYS_PER_CRYPT - 1) / MAX_KEYS_PER_CRYPT;
 
+#ifdef _OPENMP
 #pragma omp parallel for
-	for (index = 0; index < loops; index++)
 #endif
-	{
+	for (index = 0; index < loops; index++) {
 #if SIMD_COEF_32
-		DO_MMX_MD5(saved_key[index], crypt_key[index]);
+		SIMDmd5body(saved_key[index], crypt_key[index], NULL, SSEi_REVERSE_STEPS | SSEi_MIXED_IN);
 #else
 		MD5_CTX ctx;
 		MD5_Init(&ctx);
@@ -302,55 +347,82 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 }
 
 static int cmp_all(void *binary, int count) {
-	int index;
-	for (index = 0; index < count; index++)
 #ifdef SIMD_COEF_32
-        if (((ARCH_WORD_32 *) binary)[0] == ((ARCH_WORD_32*)crypt_key)[(index&(SIMD_COEF_32-1)) + (unsigned int)index/SIMD_COEF_32*4*SIMD_COEF_32])
+	unsigned int x, y;
+#if 1
+	const unsigned int c = (count + SIMD_COEF_32 - 1) / SIMD_COEF_32;
 #else
-		if ( ((ARCH_WORD_32*)binary)[0] == crypt_key[index][0] )
+	const unsigned int c = SIMD_PARA_MD5;
 #endif
+	for(y = 0; y < c; y++)
+		for(x = 0; x < SIMD_COEF_32; x++)
+		{
+			if( ((ARCH_WORD_32*)binary)[0] == ((ARCH_WORD_32*)crypt_key)[y*SIMD_COEF_32*4+x] )
+				return 1;
+		}
+	return 0;
+#else
+	unsigned int index = 0;
+
+#if 1
+	for (index = 0; index < count; index++)
+#endif
+		if (!memcmp(binary, crypt_key[index], BINARY_SIZE))
 			return 1;
 	return 0;
+#endif
 }
 
 static int cmp_one(void *binary, int index)
 {
 #ifdef SIMD_COEF_32
-    int i;
-	for (i = 0; i < BINARY_SIZE/sizeof(ARCH_WORD_32); i++)
-        if (((ARCH_WORD_32 *) binary)[i] != ((ARCH_WORD_32*)crypt_key)[(index&(SIMD_COEF_32-1)) + (unsigned int)index/SIMD_COEF_32*4*SIMD_COEF_32+i*SIMD_COEF_32])
-            return 0;
-	return 1;
+	unsigned int x = index&(SIMD_COEF_32-1);
+	unsigned int y = (unsigned int)index/SIMD_COEF_32;
+
+	return ((ARCH_WORD_32*)binary)[0] == ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*4];
 #else
-	return !memcmp(binary, crypt_key[index], BINARY_SIZE);
+	return !memcmp(binary, crypt_key[index], DIGEST_SIZE);
 #endif
 }
 
 static int cmp_exact(char *source, int index)
 {
+#ifdef SIMD_COEF_32
+	ARCH_WORD_32 crypt_key[DIGEST_SIZE / 4];
+	MD5_CTX ctx;
+	char *key = get_key(index);
+
+	MD5_Init(&ctx);
+	MD5_Update(&ctx, key, strlen(key));
+	MD5_Final((void*)crypt_key, &ctx);
+
+#ifdef REVERSE_STEPS
+	md5_reverse(crypt_key);
+#endif
+	return !memcmp(get_binary(source), crypt_key, DIGEST_SIZE);
+#else
 	return 1;
+#endif
 }
 
-static char *source(char *source, void *binary)
-{
-	static char Buf[CIPHERTEXT_LENGTH + TAG_LENGTH + 1];
-	unsigned char *cpi;
-	char *cpo;
-	int i;
-
-	strcpy(Buf, FORMAT_TAG);
-	cpo = &Buf[TAG_LENGTH];
-
-	cpi = (unsigned char*)(binary);
-
-	for (i = 0; i < BINARY_SIZE; ++i) {
-		*cpo++ = itoa16[(*cpi)>>4];
-		*cpo++ = itoa16[*cpi&0xF];
-		++cpi;
-	}
-	*cpo = 0;
-	return Buf;
-}
+#ifdef SIMD_COEF_32
+#define SIMD_INDEX (index&(SIMD_COEF_32-1))+(unsigned int)index/SIMD_COEF_32*SIMD_COEF_32*4
+static int get_hash_0(int index) { return ((ARCH_WORD_32*)crypt_key)[SIMD_INDEX] & PH_MASK_0; }
+static int get_hash_1(int index) { return ((ARCH_WORD_32*)crypt_key)[SIMD_INDEX] & PH_MASK_1; }
+static int get_hash_2(int index) { return ((ARCH_WORD_32*)crypt_key)[SIMD_INDEX] & PH_MASK_2; }
+static int get_hash_3(int index) { return ((ARCH_WORD_32*)crypt_key)[SIMD_INDEX] & PH_MASK_3; }
+static int get_hash_4(int index) { return ((ARCH_WORD_32*)crypt_key)[SIMD_INDEX] & PH_MASK_4; }
+static int get_hash_5(int index) { return ((ARCH_WORD_32*)crypt_key)[SIMD_INDEX] & PH_MASK_5; }
+static int get_hash_6(int index) { return ((ARCH_WORD_32*)crypt_key)[SIMD_INDEX] & PH_MASK_6; }
+#else
+static int get_hash_0(int index) { return crypt_key[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_key[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_key[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_key[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_key[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_key[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_key[index][0] & PH_MASK_6; }
+#endif
 
 struct fmt_main fmt_rawMD5 = {
 	{
@@ -371,9 +443,7 @@ struct fmt_main fmt_rawMD5 = {
 		FMT_OMP | FMT_OMP_BAD |
 #endif
 		FMT_CASE | FMT_8_BIT,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -384,9 +454,7 @@ struct fmt_main fmt_rawMD5 = {
 		split,
 		get_binary,
 		fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		source,
 		{
 			fmt_default_binary_hash_0,

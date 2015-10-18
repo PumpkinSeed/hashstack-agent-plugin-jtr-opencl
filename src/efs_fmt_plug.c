@@ -32,19 +32,21 @@ john_register_one(&fmt_efs);
 #include "options.h"
 #include "unicode.h"
 #include "sha.h"
-#include "gladman_hmac.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
+#include "hmac_sha.h"
 #define EFS_CRAP_LOGIC
 #include "pbkdf2_hmac_sha1.h"
 #include <openssl/des.h>
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               64
+#endif
 #endif
 #include "memdbg.h"
 
 #ifdef SIMD_COEF_32
-#define SHA1_BLK                (SHA1_SSE_PARA * SIMD_COEF_32)
+#define SHA1_BLK                (SIMD_PARA_SHA1 * SIMD_COEF_32)
 #endif
 
 #define FORMAT_LABEL            "EFS"
@@ -146,17 +148,17 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		goto err;
 	if (strlen(p) > MAX_IV_LEN * 2 || (strlen(p)&1)) /* iv length */
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL) /* iterations */
 		goto err;
-	if(!isdec(p))
+	if(!isdec(p)) // FIXME: iterations == 0 allowed?
 		goto err;
 	if ((p = strtokm(NULL, "$")) == NULL) /* data */
 		goto err;
 	if (strlen(p) > MAX_CT_LEN * 2 || (strlen(p)&1))
 		goto err;
-	if (!ishex(p))
+	if (!ishexlc(p))
 		goto err;
 	MEM_FREE(keeptr);
 	return 1;
@@ -363,7 +365,6 @@ static char *get_key(int index)
 	return (char*)utf16_to_enc(saved_key[index]);
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int iteration_count(void *salt)
 {
 	struct custom_salt *my_salt;
@@ -371,7 +372,6 @@ static unsigned int iteration_count(void *salt)
 	my_salt = salt;
 	return (unsigned int) my_salt->iterations;
 }
-#endif
 
 struct fmt_main fmt_efs = {
 	{
@@ -389,11 +389,9 @@ struct fmt_main fmt_efs = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		efs_tests
 	}, {
 		init,
@@ -404,11 +402,9 @@ struct fmt_main fmt_efs = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

@@ -29,6 +29,7 @@
 #include "external.h"
 #include "mask.h"
 #include "options.h"
+#include "unicode.h"
 #include "memdbg.h"
 
 static char int_word[PLAINTEXT_BUFFER_SIZE];
@@ -46,7 +47,7 @@ static char *ext_mode;
 
 static c_int ext_word[PLAINTEXT_BUFFER_SIZE];
 c_int ext_abort, ext_status, ext_cipher_limit, ext_minlen, ext_maxlen;
-c_int ext_time;
+c_int ext_time, ext_utf32, ext_target_utf8;
 
 static struct c_ident ext_ident_status = {
 	NULL,
@@ -54,8 +55,20 @@ static struct c_ident ext_ident_status = {
 	&ext_status
 };
 
-static struct c_ident ext_ident_abort = {
+static struct c_ident ext_ident_utf32 = {
 	&ext_ident_status,
+	"utf32",
+	&ext_utf32
+};
+
+static struct c_ident ext_ident_target_utf8 = {
+	&ext_ident_utf32,
+	"target_utf8",
+	&ext_target_utf8
+};
+
+static struct c_ident ext_ident_abort = {
+	&ext_ident_target_utf8,
 	"abort",
 	&ext_abort
 };
@@ -163,9 +176,11 @@ void ext_init(char *mode, struct db_main *db)
 
 	ext_time = (int) time(NULL);
 
-	ext_maxlen = options.force_maxlength;
-	if (options.force_minlength > 0)
-		ext_minlen = options.force_minlength;
+	ext_target_utf8 = (pers_opts.target_enc == UTF_8);
+
+	ext_maxlen = options.req_maxlength;
+	if (options.req_minlength > 0)
+		ext_minlen = options.req_minlength;
 	else
 		ext_minlen = 0;
 
@@ -181,7 +196,7 @@ void ext_init(char *mode, struct db_main *db)
 		if (john_main_process)
 			fprintf(stderr,
 			    "Compiler error in %s at line %d: %s\n",
-			    cfg_name, ext_line->number,
+			    ext_line->cfg_name, ext_line->number,
 			    c_errors[c_errno]);
 		error();
 	}
@@ -308,6 +323,10 @@ static int restore_state(FILE *file)
 		if (++count >= PLAINTEXT_BUFFER_SIZE) return 1;
 	} while ((*internal++ = *external++ = c));
 
+	if (ext_utf32)
+		enc_to_utf32((UTF32*)ext_word, PLAINTEXT_BUFFER_SIZE,
+		             (UTF8*)int_word, strlen(int_word));
+
 	c_execute(c_lookup("restore"));
 
 	return 0;
@@ -382,26 +401,30 @@ void do_external_crack(struct db_main *db)
 				continue;
 		}
 
-		int_word[0] = ext_word[0];
-		if ((int_word[1] = ext_word[1])) {
-			internal = (unsigned char *)&int_word[2];
-			external = &ext_word[2];
-			do {
-				if (!(internal[0] = external[0]))
-					break;
-				if (!(internal[1] = external[1]))
-					break;
-				if (!(internal[2] = external[2]))
-					break;
-				if (!(internal[3] = external[3]))
-					break;
-				internal += 4;
-				external += 4;
-			} while (1);
-		}
+		if (ext_utf32) {
+			utf32_to_enc((UTF8*)int_word, maxlen, (UTF32*)ext_word);
+		} else {
+			int_word[0] = ext_word[0];
+			if ((int_word[1] = ext_word[1])) {
+				internal = (unsigned char *)&int_word[2];
+				external = &ext_word[2];
+				do {
+					if (!(internal[0] = external[0]))
+						break;
+					if (!(internal[1] = external[1]))
+						break;
+					if (!(internal[2] = external[2]))
+						break;
+					if (!(internal[3] = external[3]))
+						break;
+					internal += 4;
+					external += 4;
+				} while (1);
+			}
 
-		int_word[maxlen] = 0;
-		if (options.mask) {
+			int_word[maxlen] = 0;
+		}
+		if (options.flags & FLG_MASK_STACKED) {
 			if (do_mask_crack(int_word))
 				break;
 		} else

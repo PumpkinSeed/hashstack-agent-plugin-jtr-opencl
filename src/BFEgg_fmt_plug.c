@@ -35,7 +35,9 @@ static int omp_t = 1;
 // 512 = 58573
 // 1024= 59464
 // 4096= 59244  > 1s -test=0
+#ifndef OMP_SCALE
 #define OMP_SCALE               128
+#endif
 #endif
 #include "memdbg.h"
 
@@ -165,7 +167,7 @@ static int cmp_all(void *binary, int count) {
 #ifdef _OPENMP
 	for (; index < count; index++)
 #endif
-		if (!memcmp(binary, crypt_out[index], BINARY_SIZE))
+		if (!memcmp(binary, crypt_out[index], 4))
 			return 1;
 	return 0;
 }
@@ -180,13 +182,13 @@ static int cmp_exact(char *source, int index)
   return 1;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
@@ -224,9 +226,7 @@ struct fmt_main fmt_BFEgg = {
     MIN_KEYS_PER_CRYPT,
     MAX_KEYS_PER_CRYPT,
     FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
     tests
   }, {
     init,
@@ -237,9 +237,7 @@ struct fmt_main fmt_BFEgg = {
     fmt_default_split,
     get_binary,
     fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
     fmt_default_source,
     {
 			fmt_default_binary_hash_0,

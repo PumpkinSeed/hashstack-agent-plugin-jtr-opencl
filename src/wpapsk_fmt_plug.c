@@ -18,7 +18,7 @@ john_register_one(&fmt_wpapsk);
 
 #include <string.h>
 #include "arch.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 
 #include <assert.h>
 #include "formats.h"
@@ -33,7 +33,7 @@ john_register_one(&fmt_wpapsk);
 //#undef SIMD_COEF_32
 
 #ifdef SIMD_COEF_32
-#  define NBKEYS	(SIMD_COEF_32 * SHA1_SSE_PARA)
+#  define NBKEYS	(SIMD_COEF_32 * SIMD_PARA_SHA1)
 #  ifdef _OPENMP
 #    include <omp.h>
 #  endif
@@ -50,7 +50,7 @@ john_register_one(&fmt_wpapsk);
 #define FORMAT_NAME		"WPA/WPA2 PSK"
 #define ALGORITHM_NAME		"PBKDF2-SHA1 " SHA1_ALGORITHM_NAME
 
-#define MIN_KEYS_PER_CRYPT	1
+#define MIN_KEYS_PER_CRYPT	NBKEYS
 #define MAX_KEYS_PER_CRYPT	NBKEYS
 
 extern wpapsk_password *inbuffer;
@@ -314,8 +314,8 @@ static MAYBE_INLINE void wpapsk_sse(int count, wpapsk_password * in, wpapsk_hash
 		}
 
 		for (i = 1; i < 4096; i++) {
-			SSESHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt1, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
-			SSESHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt2, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
+			SIMDSHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt1, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
+			SIMDSHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt2, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
 			for (j = 0; j < NBKEYS; j++) {
 				unsigned *p = &((unsigned int*)t_sse_hash1)[(((j/SIMD_COEF_32)*SHA_BUF_SIZ)*SIMD_COEF_32) + (j&(SIMD_COEF_32-1))];
 				for(k = 0; k < 5; k++)
@@ -346,8 +346,8 @@ static MAYBE_INLINE void wpapsk_sse(int count, wpapsk_password * in, wpapsk_hash
 			o1[(j/SIMD_COEF_32)*SIMD_COEF_32*SHA_BUF_SIZ+(j&(SIMD_COEF_32-1))+4*SIMD_COEF_32] = sha1_ctx.h4;
 		}
 		for (i = 1; i < 4096; i++) {
-			SSESHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt1, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
-			SSESHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt2, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
+			SIMDSHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt1, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
+			SIMDSHA1body((unsigned int*)t_sse_hash1, (unsigned int*)t_sse_hash1, (unsigned int*)t_sse_crypt2, SSEi_MIXED_IN|SSEi_RELOAD|SSEi_OUTPUT_AS_INP_FMT);
 			for (j = 0; j < NBKEYS; j++) {
 				unsigned *p = &((unsigned int*)t_sse_hash1)[(((j/SIMD_COEF_32)*SHA_BUF_SIZ)*SIMD_COEF_32) + (j&(SIMD_COEF_32-1))];
 				for(k = 5; k < 8; k++)
@@ -400,9 +400,7 @@ struct fmt_main fmt_wpapsk = {
 		    MIN_KEYS_PER_CRYPT,
 		    MAX_KEYS_PER_CRYPT,
 		    FMT_CASE | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		    tests
 	},
 	{
@@ -414,9 +412,7 @@ struct fmt_main fmt_wpapsk = {
 		    fmt_default_split,
 		    get_binary,
 		    get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		    fmt_default_source,
 		    {
 				binary_hash_0,

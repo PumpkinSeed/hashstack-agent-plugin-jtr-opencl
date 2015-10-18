@@ -15,6 +15,11 @@
  * ./configure)
  */
 #ifndef _JTR_JUMBO_H
+#define _JTR_JUMBO_H
+
+// use this define in some core (master) code, to be able to more cleanly insert code
+// leaving the master code more intact for easier merging of changes Solar gives us.
+#define JUMBO_JTR  1
 
 #include "arch.h"
 #include <stdio.h>
@@ -185,7 +190,7 @@ extern char *jtr_basename_r(const char *name, char *buf);
 #define basename(a) jtr_basename(a)
 
 /*
- * Removes suffixes frome src.
+ * Removes suffixes from src.
  */
 extern char *strip_suffixes(const char *src, const char *suffixes[], int count);
 
@@ -280,16 +285,16 @@ extern long long atoll(const char *);
 extern char *strdup(const char *);
 extern char *strlwr(char *);
 extern char *strupr(char *);
-extern int _strnicmp(const char*, const char *, int);
+//extern int _strnicmp(const char*, const char *, int);
 extern int _strncmp(const char*, const char *);
-extern int _stricmp(const char*, const char *);
+//extern int _stricmp(const char*, const char *);
 extern FILE *fopen64(const char *, const char *);
 extern FILE *fdopen(int, const char *);
-extern int ftruncate(int, int);
+//extern int ftruncate(int, int);
 extern long long ftello64(FILE *);
 extern int fseeko64(FILE *, long long, int);
 extern int fileno(FILE *);
-extern int _exit(int);
+//extern int _exit(int);
 #define off64_t long long
 #undef __STRICT_ANSI__
 #include <sys/file.h>
@@ -305,13 +310,6 @@ extern int _exit(int);
 #define strlwr _strlwr
 #define open _open
 #define fdopen _fdopen
-#endif
-
-#ifndef MEMDBG_ON
-#if ((AC_BUILT && HAVE__STRDUP)  || (!AC_BUILT && _MSC_VER)) && !defined (strdup)
-#undef strdup
-#define strdup _strdup
-#endif
 #endif
 
 #if (AC_BUILT && !HAVE_SNPRINTF && HAVE_SPRINTF_S) || (!AC_BUILT && _MSC_VER)
@@ -334,8 +332,6 @@ extern int vc_fixed_snprintf(char *Dest, size_t max_cnt, const char *Fmt, ...);
 #undef fileno
 #define fileno _fileno
 #pragma warning (disable : 4018 297 )
-#undef inline
-#define inline _inline
 #endif
 
 // NOTE, this still will fail on REALLY old systems, where you can only
@@ -348,7 +344,7 @@ extern int vc_fixed_snprintf(char *Dest, size_t max_cnt, const char *Fmt, ...);
 extern int setenv(const char *name, const char *val, int overwrite);
 #endif
 
-#if __MINGW32__ || __MINGW64__ || _MSC_VER
+#if (__MINGW32__ && !__MINGW64__) || _MSC_VER
 // Later versions of MSVC can handle %lld but some older
 // ones can only handle %I64d.  Easiest to simply use
 // %I64d then all versions of MSVC will handle it just fine
@@ -356,11 +352,13 @@ extern int setenv(const char *name, const char *val, int overwrite);
 #define LLd "%I64d"
 #define LLx "%I64x"
 #define Zu  "%u"
+#define Zd  "%d"
 #else
 #define LLu "%llu"
 #define LLd "%lld"
 #define LLx "%llx"
 #define Zu  "%zu"
+#define Zd  "%zd"
 #endif
 
 #if (AC_BUILT && !HAVE_STRREV) ||(!AC_BUILT && !_MSC_VER)
@@ -393,5 +391,15 @@ char *strrev(char *str);
 #define strnlen jtr_strnlen
 extern size_t strnlen(const char *s, size_t max);
 #endif
+
+#if AC_BUILT && !HAVE_STRCASESTR || !AC_BUILT && defined(__MINGW__)
+char *strcasestr(const char *haystack, const char *needle);
+#endif
+
+/*
+ * Standard PKCS padding check. On success, returns net length.
+ * On failure, returns -1.
+ */
+extern int check_pkcs_pad(const unsigned char* data, size_t len, int blocksize);
 
 #endif /* _JTR_JUMBO_H */

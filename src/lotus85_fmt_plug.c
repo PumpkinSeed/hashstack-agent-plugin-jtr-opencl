@@ -23,7 +23,9 @@ john_register_one(&fmt_lotus_85);
 
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               64  // XXX tune me!
+#endif
 static int omp_t = 1;
 #endif
 
@@ -53,8 +55,6 @@ static int omp_t = 1;
 
 /* Globals */
 static const char LOTUS85_UNIQUE_STRING[] = "Lotus Notes Password Pad Uniquifier";
-
-static const char LOTUS85_BASE16_CHARSET[] = "0123456789ABCDEFabcdef";
 
 static uint8_t ebits_to_num[256]=
 {
@@ -317,7 +317,7 @@ static void done(void)
 /* Check if given ciphertext (hash) format is valid */
 static int lotus85_valid(char *ciphertext,struct fmt_main *self)
 {
-	int i,len;
+	int len;
 
 	len = strlen(ciphertext);
 
@@ -330,9 +330,8 @@ static int lotus85_valid(char *ciphertext,struct fmt_main *self)
 	if((len >> 1) < LOTUS85_MIN_BLOB_SIZE)
 		return 0;
 
-	for (i=0;i<len;i++)
-		if(!strchr(LOTUS85_BASE16_CHARSET,ciphertext[i]))
-			return 0;
+	if (hexlenu(ciphertext)  != len)
+		return 0;
 
 	return 1;
 }
@@ -453,9 +452,7 @@ struct fmt_main fmt_lotus_85 =
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		lotus85_tests
 	}, {
 		lotus85_init,
@@ -466,9 +463,7 @@ struct fmt_main fmt_lotus_85 =
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash
@@ -479,7 +474,7 @@ struct fmt_main fmt_lotus_85 =
 		lotus85_set_key,          /*  Set plaintext password  */
 		lotus85_get_key,          /*  Get plaintext password  */
 		fmt_default_clear_keys,
-		lotus85_crypt_all,        /*  Main hash funcion       */
+		lotus85_crypt_all,        /*  Main hash function       */
 		{
 			fmt_default_get_hash
 		},

@@ -30,7 +30,9 @@ john_register_one(&fmt_keystore);
 #ifdef _OPENMP
 static int omp_t = 1;
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               64
+#endif
 #endif
 #include "memdbg.h"
 
@@ -89,9 +91,14 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
-			self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_out = mem_calloc_tiny(sizeof(*crypt_out) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_key = mem_calloc(sizeof(*saved_key), self->params.max_keys_per_crypt);
+	crypt_out = mem_calloc(sizeof(*crypt_out), self->params.max_keys_per_crypt);
+}
+
+static void done(void)
+{
+	MEM_FREE(crypt_out);
+	MEM_FREE(saved_key);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -108,31 +115,41 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	ctcopy += 10;
 	if ((p = strtokm(ctcopy, "$")) == NULL)
 		goto bail;
+	if (!isdec(p))
+		goto bail;
 	target = atoi(p);
 	if (target != 1 && target != 0)
 		goto bail;
 	if ((p = strtokm(NULL, "$")) == NULL)
 		goto bail;
+	if (!isdec(p))
+		goto bail;
 	v = atoi(p);
 	if ((p = strtokm(NULL, "$")) == NULL)
 		goto bail;
-	if (strlen(p) != v * 2)
+	if (hexlenl(p) != v*2)
 		goto bail;
 	if ((p = strtokm(NULL, "$")) == NULL) /* hash */
 		goto bail;
+	if (hexlenl(p) != BINARY_SIZE*2)
+		goto bail;
 	if ((p = strtokm(NULL, "$")) == NULL) /* number of keys */
+		goto bail;
+	if (!isdec(p))
 		goto bail;
 	/* currently we support only 1 key */
 	if(atoi(p) != 1)
 		goto bail;
 	if ((p = strtokm(NULL, "$")) == NULL) /* key length */
 		goto bail;
+	if (!isdec(p))
+		goto bail;
 	v = atoi(p);
 	if (v > SZ)
 		goto bail;
 	if ((p = strtokm(NULL, "$")) == NULL) /* key data */
 		goto bail;
-	if (strlen(p) != v * 2)
+	if (hexlenl(p) != v*2)
 		goto bail;
 	MEM_FREE(keeptr);
 	return 1;
@@ -148,27 +165,28 @@ static void *get_salt(char *ciphertext)
 	char *p;
 	int i;
 	/* NOTE: do we need dynamic allocation because of underlying large object size? */
-	static struct custom_salt cs;
-	memset(&cs, 0, sizeof(cs));
+	static struct custom_salt *cs;
+	if (!cs) cs = mem_alloc_tiny(sizeof(struct custom_salt),16);
+	memset(cs, 0, sizeof(struct custom_salt));
 	ctcopy += 10; /* skip over "$keystore$" */
 	p = strtokm(ctcopy, "$");
-	cs.target = atoi(p);
+	cs->target = atoi(p);
 	p = strtokm(NULL, "$");
-	cs.data_length = atoi(p);
+	cs->data_length = atoi(p);
 	p = strtokm(NULL, "$");
-	for (i = 0; i < cs.data_length; i++)
-		cs.data[i] = atoi16[ARCH_INDEX(p[i * 2])] * 16
+	for (i = 0; i < cs->data_length; i++)
+		cs->data[i] = atoi16[ARCH_INDEX(p[i * 2])] * 16
 			+ atoi16[ARCH_INDEX(p[i * 2 + 1])];
 	p = strtokm(NULL, "$"); /* skip hash */
 	p = strtokm(NULL, "$");
-	cs.count = atoi(p);
+	cs->count = atoi(p);
 	p = strtokm(NULL, "$");
-	cs.keysize = atoi(p);
-	for (i = 0; i < cs.keysize; i++)
-		cs.keydata[i] = atoi16[ARCH_INDEX(p[i * 2])] * 16
+	cs->keysize = atoi(p);
+	for (i = 0; i < cs->keysize; i++)
+		cs->keydata[i] = atoi16[ARCH_INDEX(p[i * 2])] * 16
 			+ atoi16[ARCH_INDEX(p[i * 2 + 1])];
 	MEM_FREE(keeptr);
-	return (void *)&cs;
+	return (void *)cs;
 }
 
 static void *get_binary(char *ciphertext)
@@ -197,13 +215,13 @@ static void *get_binary(char *ciphertext)
 	return out;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static void set_salt(void *salt)
 {
@@ -281,23 +299,19 @@ struct fmt_main fmt_keystore = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		/* FIXME: report cur_salt->data_length as tunable cost? */
 		{ NULL },
-#endif
 		keystore_tests
 	}, {
 		init,
-		fmt_default_done,
+		done,
 		fmt_default_reset,
 		fmt_default_prepare,
 		valid,
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

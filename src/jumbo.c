@@ -212,7 +212,7 @@ int fseeko64 (FILE* fp, int64_t offset, int whence) {
 		/* I could find no _filelengthi64, _filelength64, etc. */
 		GetFileSizeEx((HANDLE)_get_osfhandle(fileno(fp)), (PLARGE_INTEGER)&size);
 		pos = (fpos_t) (size + offset);
-		//fprintf(stderr, "size = %lld\n", size);
+		//fprintf(stderr, "size = "LLd"\n", size);
 	}
 	else if (whence == SEEK_SET)
 		pos = (fpos_t) offset;
@@ -318,7 +318,7 @@ char *strupr(char *s)
 #if NEED_ATOLL_NATIVE
 long long atoll(const char *s) {
 	long long l;
-	sscanf(s, "%lld", &l);
+	sscanf(s, LLd, &l);
 	return l;
 }
 #endif
@@ -367,3 +367,61 @@ size_t strnlen(const char *s, size_t max) {
 	return(p - s);
 }
 #endif
+
+#if AC_BUILT && !HAVE_STRCASESTR || !AC_BUILT && defined(__MINGW__)
+/* not optimal, but good enough for how we use it */
+char *strcasestr(const char *haystack, const char *needle) {
+	const char *H = haystack;
+	const char *N = needle;
+	const char *fnd = 0;
+	while (*N && *H) {
+		if (*N == *H) {
+			if (!fnd) fnd = H;
+			++N;
+			++H;
+			continue;
+		}
+		if (islower(*N)) {
+			if (*N == tolower(*H)) {
+				if (!fnd) fnd = H;
+				++N;
+				++H;
+				continue;
+			}
+		} else if (isupper(*N)) {
+			if (*N == toupper(*H)) {
+				if (!fnd) fnd = H;
+				++N;
+				++H;
+				continue;
+			}
+		}
+		N = needle;
+		++H;
+		fnd = 0;
+	}
+	if (*N)
+		fnd = 0;
+	return (char*)fnd;
+}
+#endif
+
+int check_pkcs_pad(const unsigned char* data, size_t len, int blocksize)
+{
+	int pad_len = data[len - 1];
+	int padding = pad_len;
+	int real_len = len - pad_len;
+	const unsigned char *p = data + real_len;
+
+	if (pad_len > blocksize || pad_len < 1)
+		return -1;
+
+	if (len < blocksize)
+		return -1;
+
+	while (pad_len--)
+		if (*p++ != padding)
+			return -1;
+
+	return real_len;
+}

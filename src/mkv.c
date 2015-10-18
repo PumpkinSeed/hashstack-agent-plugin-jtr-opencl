@@ -188,19 +188,22 @@ static int show_pwd(unsigned long long start)
 			i++;
 		pwd.len = 1;
 		pwd.level = proba1[pwd.password[0]];
-		if(show_pwd_r(&pwd, 1))
-			return 1;
-
-		if( (pwd.len >= gmin_len) && (pwd.level >= gmin_level) )
+		if (pwd.level <= gmax_level)
 		{
-			pass = (char*) pwd.password;
-			if (options.mask) {
-				if (do_mask_crack(pass))
-					return 1;
-			} else
-			if (!f_filter || ext_filter_body((char*)pwd.password, pass = pass_filtered))
-				if(crk_process_key(pass))
-					return 1;
+			if(show_pwd_r(&pwd, 1))
+				return 1;
+
+			if( (pwd.len >= gmin_len) && (pwd.level >= gmin_level) )
+			{
+				pass = (char*) pwd.password;
+				if (options.mask) {
+					if (do_mask_crack(pass))
+						return 1;
+				} else
+				if (!f_filter || ext_filter_body((char*)pwd.password, pass = pass_filtered))
+					if(crk_process_key(pass))
+						return 1;
+			}
 		}
 		gidx++;
 		i++;
@@ -420,10 +423,10 @@ void get_markov_options(struct db_main *db,
 	/* Command-line --min-length and --max-length can over-ride lengths
 	   from config file. This may clash with the len_token stuff, or rather
 	   it will over-ride that too. */
-	if (options.force_minlength >= 0)
-		minlen = options.force_minlength;
-	if (options.force_maxlength)
-		maxlen = options.force_maxlength;
+	if (options.req_minlength >= 0)
+		minlen = options.req_minlength;
+	if (options.req_maxlength)
+		maxlen = options.req_maxlength;
 
 	if(maxlen <= 0) {
 		if( (maxlen = cfg_get_int(SECTION_MARKOV, mode, "MkvMaxLen")) == -1 )

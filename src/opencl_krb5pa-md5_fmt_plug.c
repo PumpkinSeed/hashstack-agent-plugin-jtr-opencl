@@ -64,14 +64,9 @@ john_register_one(&fmt_opencl_krb5pa_md5);
 #define SALT_ALIGN         4
 #define TOTAL_LENGTH       (14 + 2 * (CHECKSUM_SIZE + TIMESTAMP_SIZE) + MAX_REALMLEN + MAX_USERLEN + MAX_SALTLEN)
 
-#define MIN(a, b)               (((a) > (b)) ? (b) : (a))
-#define MAX(a, b)               (((a) > (b)) ? (a) : (b))
-
 // these may be altered in init()
 #define MIN_KEYS_PER_CRYPT 1
 #define MAX_KEYS_PER_CRYPT 1
-
-#define HEXCHARS           "0123456789abcdefABCDEF"
 
 // Second and third plaintext will be replaced in init() under come encodings
 static struct fmt_tests tests[] = {
@@ -129,20 +124,6 @@ static size_t get_task_max_work_group_size()
 	return s;
 }
 
-static size_t get_task_max_size()
-{
-	return 0;
-}
-
-static size_t get_default_workgroup()
-{
-	if (cpu(device_info[gpu_id]))
-		return get_platform_vendor_id(platform_id) == DEV_INTEL ?
-			8 : 1;
-	else
-		return 64;
-}
-
 static void create_clobj(size_t gws, struct fmt_main *self)
 {
 	pinned_key = clCreateBuffer(context[gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, max_len * gws, NULL, &ret_code);
@@ -187,39 +168,47 @@ static void create_clobj(size_t gws, struct fmt_main *self)
 
 static void release_clobj(void)
 {
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_salt, saltblob, 0, NULL, NULL), "Error Unmapping saltblob");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_result, output, 0, NULL, NULL), "Error Unmapping output");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_key, saved_key, 0, NULL, NULL), "Error Unmapping saved_key");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_idx, saved_idx, 0, NULL, NULL), "Error Unmapping saved_idx");
-	HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error releasing memory mappings");
+	if (cl_nthash) {
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_salt, saltblob, 0, NULL, NULL), "Error Unmapping saltblob");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_result, output, 0, NULL, NULL), "Error Unmapping output");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_key, saved_key, 0, NULL, NULL), "Error Unmapping saved_key");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_idx, saved_idx, 0, NULL, NULL), "Error Unmapping saved_idx");
+		HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error releasing memory mappings");
 
-	HANDLE_CLERROR(clReleaseMemObject(pinned_salt), "Release pinned salt buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_result), "Release pinned result buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_key), "Release pinned key buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_idx), "Release pinned index buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saltblob), "Release salt buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_result), "Release result buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saved_key), "Release key buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saved_idx), "Release index buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_nthash), "Release state buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_salt), "Release pinned salt buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_result), "Release pinned result buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_key), "Release pinned key buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_idx), "Release pinned index buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saltblob), "Release salt buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_result), "Release result buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saved_key), "Release key buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saved_idx), "Release index buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_nthash), "Release state buffer");
+
+		cl_nthash = NULL;
+	}
 }
 
 static void done(void)
 {
-	release_clobj();
+	if (autotuned) {
+		release_clobj();
 
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(krb5pa_md5_nthash), "Release kernel");
-	HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+		HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
+		HANDLE_CLERROR(clReleaseKernel(krb5pa_md5_nthash), "Release kernel");
+		HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+
+		autotuned--;
+	}
 }
 
 static void *get_salt(char *ciphertext);
 
 static void init(struct fmt_main *_self)
 {
-	char build_opts[64];
-
 	self = _self;
+
+	opencl_prepare_dev(gpu_id);
 
 	if (pers_opts.target_enc == UTF_8) {
 		max_len = self->params.plaintext_length = 3 * PLAINTEXT_LENGTH;
@@ -238,22 +227,27 @@ static void init(struct fmt_main *_self)
 			tests[2].ciphertext = "$mskrb5$$$057cd5cb706b3de18e059912b1f057e3$fe2e561bd4e42767e972835ea99f08582ba526e62a6a2b6f61364e30aca7c6631929d427";
 		}
 	}
-
-	snprintf(build_opts, sizeof(build_opts),
-	         "-D%s -DPLAINTEXT_LENGTH=%u",
-	         cp_id2macro(pers_opts.target_enc), PLAINTEXT_LENGTH);
-	opencl_init("$JOHN/kernels/krb5pa-md5_kernel.cl", gpu_id, build_opts);
-
-	/* create kernels to execute */
-	krb5pa_md5_nthash = clCreateKernel(program[gpu_id], "krb5pa_md5_nthash", &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
-	crypt_kernel = clCreateKernel(program[gpu_id], "krb5pa_md5_final", &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 }
 
 static void reset(struct db_main *db)
 {
-	if (!db) {
+	if (!autotuned) {
+		char build_opts[64];
+
+		snprintf(build_opts, sizeof(build_opts),
+#if !NT_FULL_UNICODE
+		         "-DUCS_2 "
+#endif
+		         "-D%s -DPLAINTEXT_LENGTH=%u",
+		         cp_id2macro(pers_opts.target_enc), PLAINTEXT_LENGTH);
+		opencl_init("$JOHN/kernels/krb5pa-md5_kernel.cl", gpu_id, build_opts);
+
+		/* create kernels to execute */
+		krb5pa_md5_nthash = clCreateKernel(program[gpu_id], "krb5pa_md5_nthash", &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+		crypt_kernel = clCreateKernel(program[gpu_id], "krb5pa_md5_final", &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+
 		//Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 2, self,
 		                       create_clobj, release_clobj,
@@ -346,14 +340,17 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 	if (new_keys) {
 		if (key_idx > key_offset)
-			HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, key_offset, key_idx - key_offset, saved_key + key_offset, 0, NULL, NULL), "Failed transferring keys");
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_idx, CL_FALSE, idx_offset, 4 * (global_work_size + 1) - idx_offset, saved_idx + (idx_offset / 4), 0, NULL, multi_profilingEvent[0]), "Failed transferring index");
-		HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], krb5pa_md5_nthash, 1, NULL, &global_work_size, &lws, 0, NULL, multi_profilingEvent[1]), "Failed running first kernel");
+			BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, key_offset, key_idx - key_offset, saved_key + key_offset, 0, NULL, NULL), "Failed transferring keys");
+		BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_idx, CL_FALSE, idx_offset, 4 * (global_work_size + 1) - idx_offset, saved_idx + (idx_offset / 4), 0, NULL, multi_profilingEvent[0]), "Failed transferring index");
+		BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], krb5pa_md5_nthash, 1, NULL, &global_work_size, &lws, 0, NULL, multi_profilingEvent[1]), "Failed running first kernel");
 
 		new_keys = 0;
 	}
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &global_work_size, &lws, 0, NULL, multi_profilingEvent[2]), "Failed running second kernel");
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_result, CL_TRUE, 0, BINARY_SIZE * global_work_size, output, 0, NULL, multi_profilingEvent[3]), "failed reading results back");
+	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &global_work_size, &lws, 0, NULL, multi_profilingEvent[2]), "Failed running second kernel");
+	BENCH_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_result, CL_TRUE, 0, BINARY_SIZE * global_work_size, output, 0, NULL, multi_profilingEvent[3]), "failed reading results back");
+
+	if (ocl_autotune_running)
+		return count;
 
 	for (i = 0; i < count; i++) {
 		unsigned char *binary = &((unsigned char*)output)[BINARY_SIZE * i];
@@ -477,14 +474,14 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		// checksum
 		p = strchr(data, '$');
 		if (!p || p - data != 2 * CHECKSUM_SIZE ||
-		    strspn(data, HEXCHARS) != p - data)
+		    strspn(data, HEXCHARS_all) != p - data)
 			return 0;
 		data = p + 1;
 
 		// encrypted timestamp
 		p += strlen(data) + 1;
 		if (*p || p - data != TIMESTAMP_SIZE * 2 ||
-		    strspn(data, HEXCHARS) != p - data)
+		    strspn(data, HEXCHARS_all) != p - data)
 			return 0;
 
 		return 1;
@@ -512,7 +509,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		// timestamp+checksum
 		p += strlen(data) + 1;
 		if (*p || p - data != (TIMESTAMP_SIZE + CHECKSUM_SIZE) * 2 ||
-		    strspn(data, HEXCHARS) != p - data)
+		    strspn(data, HEXCHARS_all) != p - data)
 			return 0;
 
 		return 1;
@@ -540,13 +537,13 @@ static int cmp_exact(char *source, int index)
 	return 1;
 }
 
-static int get_hash_0(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & 0xf; }
-static int get_hash_1(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & 0xff; }
-static int get_hash_2(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & 0xfff; }
-static int get_hash_3(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & 0xffff; }
-static int get_hash_4(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & 0xfffff; }
-static int get_hash_5(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & 0xffffff; }
-static int get_hash_6(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & 0x7ffffff; }
+static int get_hash_0(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & PH_MASK_0; }
+static int get_hash_1(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & PH_MASK_1; }
+static int get_hash_2(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & PH_MASK_2; }
+static int get_hash_3(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & PH_MASK_3; }
+static int get_hash_4(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & PH_MASK_4; }
+static int get_hash_5(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & PH_MASK_5; }
+static int get_hash_6(int index) { return *(ARCH_WORD_32*)&output[index * BINARY_SIZE / sizeof(ARCH_WORD_32)] & PH_MASK_6; }
 
 static int salt_hash(void *salt)
 {
@@ -569,9 +566,7 @@ struct fmt_main fmt_opencl_krb5pa_md5 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -582,9 +577,7 @@ struct fmt_main fmt_opencl_krb5pa_md5 = {
 		split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

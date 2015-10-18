@@ -26,7 +26,9 @@ john_register_one(&fmt_pbkdf2_hmac_sha1);
 #include "pbkdf2_hmac_sha1.h"
 #ifdef _OPENMP
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE               64
+#endif
 #endif
 #include "memdbg.h"
 
@@ -56,7 +58,7 @@ john_register_one(&fmt_pbkdf2_hmac_sha1);
 #define BENCHMARK_LENGTH        -1
 
 #ifdef SIMD_COEF_32
-#define MIN_KEYS_PER_CRYPT      SIMD_COEF_32
+#define MIN_KEYS_PER_CRYPT      SSE_GROUP_SZ_SHA1
 #define MAX_KEYS_PER_CRYPT      SSE_GROUP_SZ_SHA1
 #else
 #define MIN_KEYS_PER_CRYPT      1
@@ -65,9 +67,6 @@ john_register_one(&fmt_pbkdf2_hmac_sha1);
 
 #define PAD_SIZE                64
 #define PLAINTEXT_LENGTH        125
-
-#define MIN(a,b)                (((a)<(b))?(a):(b))
-#define MAX(a,b)                (((a)>(b))?(a):(b))
 
 static struct fmt_tests tests[] = {
 	{"$pbkdf2-hmac-sha1$1000.fd11cde0.27de197171e6d49fc5f55c9ef06c0d8751cd7250", "3956"},
@@ -121,7 +120,7 @@ static char *prepare(char *fields[10], struct fmt_main *self)
 	if (strncmp(fields[1], PKCS5S2_TAG, 9) != 0 && strncmp(fields[1], PK5K2_TAG, 6))
 		return fields[1];
 	if (!strncmp(fields[1], PKCS5S2_TAG, 9)) {
-		char tmp[120];
+		char tmp[120+4];
 		if (strlen(fields[1]) > 75) return fields[1];
 		//{"{PKCS5S2}DQIXJU038u4P7FdsuFTY/+35bm41kfjZa57UrdxHp2Mu3qF2uy+ooD+jF5t1tb8J", "password"},
 		//{"$pbkdf2-hmac-sha1$10000.0d0217254d37f2ee0fec576cb854d8ff.edf96e6e3591f8d96b9ed4addc47a7632edea176bb2fa8a03fa3179b75b5bf09", "password"},
@@ -130,7 +129,7 @@ static char *prepare(char *fields[10], struct fmt_main *self)
 		return Buf;
 	}
 	if (!strncmp(fields[1], PK5K2_TAG, 6)) {
-		char tmps[140], tmph[70], *cp, *cp2;
+		char tmps[160+4], tmph[160+4], *cp, *cp2;
 		unsigned iter=0;
 		// salt was listed as 1024 bytes max. But our max salt size is 64 bytes (~90 base64 bytes).
 		if (strlen(fields[1]) > 128) return fields[1];
@@ -140,6 +139,7 @@ static char *prepare(char *fields[10], struct fmt_main *self)
 		cp += 6;
 		while (*cp && *cp != '$') {
 			iter *= 0x10;
+			if (atoi16[ARCH_INDEX(*cp)] == 0x7f) return fields[1];
 			iter += atoi16[ARCH_INDEX(*cp)];
 			++cp;
 		}
@@ -148,8 +148,10 @@ static char *prepare(char *fields[10], struct fmt_main *self)
 		cp2 = strchr(cp, '$');
 		if (!cp2) return fields[1];
 		base64_convert(cp, e_b64_mime, cp2-cp, tmps, e_b64_hex, sizeof(tmps), flg_Base64_MIME_DASH_UNDER);
+		if (strlen(tmps) > 64) return fields[1];
 		++cp2;
 		base64_convert(cp2, e_b64_mime, strlen(cp2), tmph, e_b64_hex, sizeof(tmph), flg_Base64_MIME_DASH_UNDER);
+		if (strlen(tmph) != 40) return fields[1];
 		sprintf(Buf, "$pbkdf2-hmac-Sha1$%d.%s.%s", iter, tmps, tmph);
 		return Buf;
 	}
@@ -269,13 +271,13 @@ static void set_salt(void *salt)
 	cur_salt = (struct custom_salt *)salt;
 }
 
-static int get_hash_0(int index) { return crypt_out[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_out[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_out[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_out[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_out[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_out[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_out[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_out[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_out[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_out[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_out[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_out[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_out[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_out[index][0] & PH_MASK_6; }
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
@@ -390,7 +392,6 @@ static char *get_key(int index)
 	return saved_key[index];
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int iteration_count(void *salt)
 {
 	struct custom_salt *my_salt;
@@ -398,7 +399,6 @@ static unsigned int iteration_count(void *salt)
 	my_salt = salt;
 	return (unsigned int) my_salt->rounds;
 }
-#endif
 
 struct fmt_main fmt_pbkdf2_hmac_sha1 = {
 	{
@@ -416,11 +416,9 @@ struct fmt_main fmt_pbkdf2_hmac_sha1 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_SPLIT_UNIFIES_CASE,
-#if FMT_MAIN_VERSION > 11
 		{
 			"iteration count",
 		},
-#endif
 		tests
 	}, {
 		init,
@@ -431,11 +429,9 @@ struct fmt_main fmt_pbkdf2_hmac_sha1 = {
 		split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

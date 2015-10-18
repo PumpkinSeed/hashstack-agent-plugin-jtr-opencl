@@ -80,12 +80,14 @@ john_register_one(&fmt_NETNTLM_new);
 #include <openssl/des.h>
 
 #include "arch.h"
-#include "sse-intrinsics.h"
+#include "simd-intrinsics.h"
 #ifdef SIMD_COEF_32
-#define NBKEYS                  (SIMD_COEF_32 * MD4_SSE_PARA)
+#define NBKEYS                  (SIMD_COEF_32 * SIMD_PARA_MD4)
 #else
 #ifdef _OPENMP
+#ifndef OMP_SCALE
 #define OMP_SCALE               4
+#endif
 #include <omp.h>
 #endif
 #endif
@@ -107,7 +109,6 @@ extern volatile int bench_running;
 #ifndef uchar
 #define uchar unsigned char
 #endif
-#define MIN(a, b)               (((a) > (b)) ? (b) : (a))
 
 #define CHAP_FORMAT_LABEL       "MSCHAPv2"
 #define CHAP_FORMAT_NAME        "C/R"
@@ -984,7 +985,7 @@ static void init(struct fmt_main *self)
 		                       sizeof(unsigned short));
 	}
 	if (bitmap == NULL)
-		bitmap = mem_calloc_tiny(0x10000 / 8, MEM_ALIGN_CACHE);
+		bitmap = mem_calloc_align(1, 0x10000 / 8, MEM_ALIGN_CACHE);
 	else
 		memset(bitmap, 0, 0x10000 / 8);
 	use_bitmap = 0; /* we did not use bitmap yet */
@@ -993,6 +994,7 @@ static void init(struct fmt_main *self)
 
 static void done(void)
 {
+	MEM_FREE(bitmap);
 	MEM_FREE(crypt_key);
 	MEM_FREE(nthash);
 #ifndef SIMD_COEF_32
@@ -1129,10 +1131,9 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 #pragma omp parallel for
 #endif
 		for (i = 0; i < BLOCK_LOOPS; i++)
-			SSEmd4body(&saved_key[i * NBKEYS * 64],
-			           (unsigned int*)&nthash[i * NBKEYS * 16], NULL, SSEi_MIXED_IN);
+			SIMDmd4body(&saved_key[i * NBKEYS * 64], (unsigned int*)&nthash[i * NBKEYS * 16], NULL, SSEi_MIXED_IN);
 #else
-		SSEmd4body(saved_key, (unsigned int*)nthash, 1);
+		SIMDmd4body(saved_key, (unsigned int*)nthash, NULL, SSEi_MIXED_IN);
 #endif
 		if (use_bitmap)
 			for (i = 0; i < NBKEYS * BLOCK_LOOPS; i++) {
@@ -1292,15 +1293,15 @@ static int cmp_exact(char *source, int index)
 
 static int salt_hash(void *salt) { return *(ARCH_WORD_32*)salt & (SALT_HASH_SIZE - 1); }
 
-static int binary_hash_0(void *binary) { return *(unsigned short*)binary & 0xF; }
-static int binary_hash_1(void *binary) { return *(unsigned short*)binary & 0xFF; }
-static int binary_hash_2(void *binary) { return *(unsigned short*)binary & 0xFFF; }
-static int binary_hash_3(void *binary) { return *(unsigned short*)binary & 0xFFFF; }
+static int binary_hash_0(void *binary) { return *(unsigned short*)binary & PH_MASK_0; }
+static int binary_hash_1(void *binary) { return *(unsigned short*)binary & PH_MASK_1; }
+static int binary_hash_2(void *binary) { return *(unsigned short*)binary & PH_MASK_2; }
+static int binary_hash_3(void *binary) { return *(unsigned short*)binary & PH_MASK_3; }
 
-static int get_hash_0(int index) { return crypt_key[index] & 0xF; }
-static int get_hash_1(int index) { return crypt_key[index] & 0xFF; }
-static int get_hash_2(int index) { return crypt_key[index] & 0xFFF; }
-static int get_hash_3(int index) { return crypt_key[index] & 0xFFFF; }
+static int get_hash_0(int index) { return crypt_key[index] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_key[index] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_key[index] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_key[index] & PH_MASK_3; }
 
 struct fmt_main fmt_MSCHAPv2_new = {
 	{
@@ -1321,9 +1322,7 @@ struct fmt_main fmt_MSCHAPv2_new = {
 		FMT_OMP |
 #endif
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		chap_tests
 	}, {
 		init,
@@ -1334,9 +1333,7 @@ struct fmt_main fmt_MSCHAPv2_new = {
 		chap_split,
 		get_binary,
 		chap_get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			binary_hash_0,
@@ -1384,13 +1381,11 @@ struct fmt_main fmt_NETNTLM_new = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-#if !defined(SIMD_COEF_32) || (defined(MD4_SSE_PARA) && defined(SSE_OMP))
+#if !defined(SIMD_COEF_32) || (defined(SIMD_PARA_MD4) && defined(SSE_OMP))
 		FMT_OMP |
 #endif
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		ntlm_tests
 	}, {
 		init,
@@ -1401,9 +1396,7 @@ struct fmt_main fmt_NETNTLM_new = {
 		ntlm_split,
 		get_binary,
 		ntlm_get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			binary_hash_0,

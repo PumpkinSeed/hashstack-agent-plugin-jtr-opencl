@@ -56,9 +56,6 @@ john_register_one(&fmt_opencl_NTLMv2);
 #define CIPHERTEXT_LENGTH       32 /* hex chars */
 #define TOTAL_LENGTH            (12 + 3 * SALT_MAX_LENGTH + 1 + SERVER_CHALL_LENGTH + 1 + CLIENT_CHALL_LENGTH_MAX + 1 + CIPHERTEXT_LENGTH + 1)
 
-#define MIN(a, b)               (((a) > (b)) ? (b) : (a))
-#define MAX(a, b)               (((a) > (b)) ? (a) : (b))
-
 /* these will be altered in init() depending on GPU */
 #define MIN_KEYS_PER_CRYPT      1
 #define MAX_KEYS_PER_CRYPT      1
@@ -90,7 +87,6 @@ static size_t key_offset, idx_offset;
 static unsigned char *challenge;
 static int new_keys, partial_output;
 static int max_len = PLAINTEXT_LENGTH;
-static unsigned int v_width = 1;	/* Vector width of kernel */
 static struct fmt_main *self;
 
 static cl_mem cl_saved_key, cl_saved_idx, cl_challenge, cl_nthash, cl_result;
@@ -118,29 +114,9 @@ static size_t get_task_max_work_group_size()
 	return s;
 }
 
-static size_t get_task_max_size()
-{
-	return 0;
-}
-
-static size_t get_default_workgroup()
-{
-#if 0
-	return get_task_max_work_group_size(); // GTX980: 53986K c/s
-#elif 0
-	return 0; // 53986K
-#else
-	if (cpu(device_info[gpu_id]))
-		return get_platform_vendor_id(platform_id) == DEV_INTEL ?
-			8 : 1;
-	else
-		return 64; // 54878K c/s
-#endif
-}
-
 static void create_clobj(size_t gws, struct fmt_main *self)
 {
-	gws *= v_width;
+	gws *= ocl_v_width;
 
 	pinned_key = clCreateBuffer(context[gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, max_len * gws, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating page-locked buffer");
@@ -184,30 +160,38 @@ static void create_clobj(size_t gws, struct fmt_main *self)
 
 static void release_clobj(void)
 {
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_salt, challenge, 0, NULL, NULL), "Error Unmapping challenge");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_result, output, 0, NULL, NULL), "Error Unmapping output");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_key, saved_key, 0, NULL, NULL), "Error Unmapping saved_key");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_idx, saved_idx, 0, NULL, NULL), "Error Unmapping saved_idx");
-	HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error releasing memory mappings");
+	if (cl_nthash) {
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_salt, challenge, 0, NULL, NULL), "Error Unmapping challenge");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_result, output, 0, NULL, NULL), "Error Unmapping output");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_key, saved_key, 0, NULL, NULL), "Error Unmapping saved_key");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_idx, saved_idx, 0, NULL, NULL), "Error Unmapping saved_idx");
+		HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error releasing memory mappings");
 
-	HANDLE_CLERROR(clReleaseMemObject(pinned_salt), "Release pinned salt buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_result), "Release pinned result buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_key), "Release pinned key buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_idx), "Release pinned index buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_challenge), "Release salt buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_result), "Release result buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saved_key), "Release key buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saved_idx), "Release index buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_nthash), "Release state buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_salt), "Release pinned salt buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_result), "Release pinned result buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_key), "Release pinned key buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_idx), "Release pinned index buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_challenge), "Release salt buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_result), "Release result buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saved_key), "Release key buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saved_idx), "Release index buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_nthash), "Release state buffer");
+
+		cl_nthash = NULL;
+	}
 }
 
 static void done(void)
 {
-	release_clobj();
+	if (autotuned) {
+		release_clobj();
 
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(ntlmv2_nthash), "Release kernel");
-	HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+		HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
+		HANDLE_CLERROR(clReleaseKernel(ntlmv2_nthash), "Release kernel");
+		HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+
+		autotuned--;
+	}
 }
 
 /*
@@ -283,45 +267,54 @@ static void set_salt(void *salt)
 
 static void init(struct fmt_main *_self)
 {
-	char build_opts[96];
 	static char valgo[32] = "";
 
 	self = _self;
 
-	if ((v_width = opencl_get_vector_width(gpu_id,
-	                                       sizeof(cl_int))) > 1) {
+	opencl_prepare_dev(gpu_id);
+	/* Nvidia Kepler benefits from 2x interleaved code */
+	if (!options.v_width && nvidia_sm_3x(device_info[gpu_id]))
+		ocl_v_width = 2;
+	else
+		ocl_v_width = opencl_get_vector_width(gpu_id, sizeof(cl_int));
+
+	if (ocl_v_width > 1) {
 		/* Run vectorized kernel */
 		snprintf(valgo, sizeof(valgo),
-		         ALGORITHM_NAME " %ux", v_width);
+		         ALGORITHM_NAME " %ux", ocl_v_width);
 		self->params.algorithm_name = valgo;
 	}
 
 	if (pers_opts.target_enc == UTF_8)
 		max_len = self->params.plaintext_length = 3 * PLAINTEXT_LENGTH;
-
-	snprintf(build_opts, sizeof(build_opts),
-	        "-D%s -DPLAINTEXT_LENGTH=%u -DV_WIDTH=%u",
-	         cp_id2macro(pers_opts.target_enc), PLAINTEXT_LENGTH, v_width);
-	opencl_init("$JOHN/kernels/ntlmv2_kernel.cl", gpu_id, build_opts);
-
-	/* create kernels to execute */
-	ntlmv2_nthash = clCreateKernel(program[gpu_id], "ntlmv2_nthash", &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
-	crypt_kernel = clCreateKernel(program[gpu_id], "ntlmv2_final", &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 }
 
 static void reset(struct db_main *db)
 {
-	if (!db) {
+	if (!autotuned) {
 		size_t gws_limit;
+		char build_opts[96];
 
-		gws_limit = (4 << 20) / v_width;
+		snprintf(build_opts, sizeof(build_opts),
+#if !NT_FULL_UNICODE
+		         "-DUCS_2 "
+#endif
+		         "-D%s -DPLAINTEXT_LENGTH=%u -DV_WIDTH=%u",
+		         cp_id2macro(pers_opts.target_enc), PLAINTEXT_LENGTH, ocl_v_width);
+		opencl_init("$JOHN/kernels/ntlmv2_kernel.cl", gpu_id, build_opts);
+
+		/* create kernels to execute */
+		ntlmv2_nthash = clCreateKernel(program[gpu_id], "ntlmv2_nthash", &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+		crypt_kernel = clCreateKernel(program[gpu_id], "ntlmv2_final", &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+
+		gws_limit = (4 << 20) / ocl_v_width;
 
 		//Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 3, self,
 		                       create_clobj, release_clobj,
-		                       2 * v_width * max_len, gws_limit);
+		                       2 * ocl_v_width * max_len, gws_limit);
 
 		//Auto tune execution from shared/included code.
 		autotune_run(self, 11, gws_limit, 500);
@@ -413,7 +406,7 @@ static char *prepare(char *split_fields[10], struct fmt_main *self)
 
 	/* DOMAIN\USER: -or- USER::DOMAIN: */
 	if ((tmp = strstr(login, "\\")) != NULL) {
-		identity = (char *) mem_alloc(strlen(login));
+		identity = (char *) mem_alloc(strlen(login)*2 + 1);
 		strcpy(identity, tmp + 1);
 
 		/* Upper-Case Username - Not Domain */
@@ -422,7 +415,7 @@ static char *prepare(char *split_fields[10], struct fmt_main *self)
 		strncat(identity, login, tmp - login);
 	}
 	else {
-		identity = (char *) mem_alloc(strlen(login) + strlen(uid) + 1);
+		identity = (char *) mem_alloc(strlen(login)*2 + strlen(uid) + 1);
 		strcpy(identity, login);
 
 		enc_strupper(identity);
@@ -493,22 +486,22 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	size_t *lws = local_work_size ? &local_work_size : NULL;
 
 	/* Don't do more than requested */
-	global_work_size = local_work_size ? ((count + (v_width * local_work_size - 1)) / (v_width * local_work_size)) * local_work_size : count / v_width;
-	scalar_gws = global_work_size * v_width;
+	global_work_size = GET_MULTIPLE_OR_BIGGER_VW(count, local_work_size);
+	scalar_gws = global_work_size * ocl_v_width;
 
 	/* Self-test cludge */
 	if (idx_offset > 4 * (scalar_gws + 1))
 		idx_offset = 0;
 
 	if (new_keys) {
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, key_offset, key_idx - key_offset, saved_key + key_offset, 0, NULL, multi_profilingEvent[0]), "Failed transferring keys");
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_idx, CL_FALSE, idx_offset, 4 * (scalar_gws + 1) - idx_offset, saved_idx + (idx_offset / 4), 0, NULL, multi_profilingEvent[1]), "Failed transferring index");
-		HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], ntlmv2_nthash, 1, NULL, &scalar_gws, lws, 0, NULL, multi_profilingEvent[2]), "Failed running first kernel");
+		BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, key_offset, key_idx - key_offset, saved_key + key_offset, 0, NULL, multi_profilingEvent[0]), "Failed transferring keys");
+		BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_idx, CL_FALSE, idx_offset, 4 * (scalar_gws + 1) - idx_offset, saved_idx + (idx_offset / 4), 0, NULL, multi_profilingEvent[1]), "Failed transferring index");
+		BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], ntlmv2_nthash, 1, NULL, &scalar_gws, lws, 0, NULL, multi_profilingEvent[2]), "Failed running first kernel");
 
 		new_keys = 0;
 	}
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &global_work_size, lws, 0, NULL, multi_profilingEvent[3]), "Failed running second kernel");
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_result, CL_TRUE, 0, 4 * scalar_gws, output, 0, NULL, multi_profilingEvent[4]), "failed reading results back");
+	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &global_work_size, lws, 0, NULL, multi_profilingEvent[3]), "Failed running second kernel");
+	BENCH_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_result, CL_TRUE, 0, 4 * scalar_gws, output, 0, NULL, multi_profilingEvent[4]), "failed reading results back");
 
 	partial_output = 1;
 
@@ -536,13 +529,13 @@ static int cmp_exact(char *source, int index)
 	int i;
 
 	if (partial_output) {
-		HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_result, CL_TRUE, 0, 16 * v_width * global_work_size, output, 0, NULL, NULL), "failed reading results back");
+		HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_result, CL_TRUE, 0, 16 * ocl_v_width * global_work_size, output, 0, NULL, NULL), "failed reading results back");
 		partial_output = 0;
 	}
 	binary = (ARCH_WORD_32*)get_binary(source);
 
 	for(i = 0; i < DIGEST_SIZE / 4; i++)
-		if (output[i * v_width * global_work_size + index] != binary[i])
+		if (output[i * ocl_v_width * global_work_size + index] != binary[i])
 			return 0;
 	return 1;
 }
@@ -595,13 +588,13 @@ static int salt_hash(void *salt)
 	return ((ARCH_WORD_32*)salt)[17+2+5] & (SALT_HASH_SIZE - 1);
 }
 
-static int get_hash_0(int index) { return output[index] & 0xf; }
-static int get_hash_1(int index) { return output[index] & 0xff; }
-static int get_hash_2(int index) { return output[index] & 0xfff; }
-static int get_hash_3(int index) { return output[index] & 0xffff; }
-static int get_hash_4(int index) { return output[index] & 0xfffff; }
-static int get_hash_5(int index) { return output[index] & 0xffffff; }
-static int get_hash_6(int index) { return output[index] & 0x7ffffff; }
+static int get_hash_0(int index) { return output[index] & PH_MASK_0; }
+static int get_hash_1(int index) { return output[index] & PH_MASK_1; }
+static int get_hash_2(int index) { return output[index] & PH_MASK_2; }
+static int get_hash_3(int index) { return output[index] & PH_MASK_3; }
+static int get_hash_4(int index) { return output[index] & PH_MASK_4; }
+static int get_hash_5(int index) { return output[index] & PH_MASK_5; }
+static int get_hash_6(int index) { return output[index] & PH_MASK_6; }
 
 struct fmt_main fmt_opencl_NTLMv2 = {
 	{
@@ -619,9 +612,7 @@ struct fmt_main fmt_opencl_NTLMv2 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_UNICODE | FMT_UTF8,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -632,9 +623,7 @@ struct fmt_main fmt_opencl_NTLMv2 = {
 		split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

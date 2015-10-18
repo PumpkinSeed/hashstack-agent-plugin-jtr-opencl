@@ -18,7 +18,7 @@
  * 6. http://oldhome.schmorp.de/marc/fcrackzip.html (coding hints)
  * 7. http://www.pkware.com/documents/casestudies/APPNOTE.TXT
  * 8. http://gladman.plushost.co.uk/oldsite/cryptography_technology/fileencrypt/index.php
- *   (borrowed files have "gladman_" prepended to them)
+ *   (borrowed files have "gladman_" prepended to them). This gladman code has been removed from JtR source tree.
  * 9. http://svn.assembla.com/svn/os2utils/unzip60f/proginfo/extrafld.txt
  * 10. http://emerge.hg.sourceforge.net/hgweb/emerge/emerge/diff/c2f208617d32/Source/unzip/proginfo/extrafld.txt
  *
@@ -90,6 +90,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include "arch.h"
 #if !AC_BUILT || HAVE_LIMITS_H
 #include <limits.h>
 #endif
@@ -113,7 +114,7 @@
 
 #define LARGE_ENOUGH 8192
 
-static int checksum_only=0, use_magic=1;
+static int checksum_only=0, use_magic=0;
 static int force_2_byte_checksum = 0;
 static char *ascii_fname, *only_fname;
 static int inline_thr = MAX_INLINE_SIZE;
@@ -128,7 +129,7 @@ static void process_file(const char *fname)
 	unsigned char filename[1024];
 	FILE *fp;
 	int i;
-	long long off_sig;
+	unsigned long long off_sig;
 	char path[LARGE_ENOUGH];
 	char *cur=0, *cp;
 	uint32_t best_len = 0xffffffff;
@@ -142,7 +143,7 @@ static void process_file(const char *fname)
 	while (!feof(fp)) {
 		uint32_t id = fget32LE(fp);
 		uint32_t store = 0;
-		off_sig = (long long) (ftell(fp)-4);
+		off_sig = (unsigned long long) (ftell(fp)-4);
 
 		if (id == 0x04034b50UL) {	/* local header */
 			uint16_t version = fget16LE(fp);
@@ -212,7 +213,8 @@ static void process_file(const char *fname)
 				(void) actual_compression_method; /* we need this!! */
 
 				if (store) cp += sprintf(cp, "%s:$zip2$*0*%x*%x*", bname, efh_aes_strength, magic_enum);
-				if (fread(salt, 1, 4+4*efh_aes_strength, fp) != 4+4*efh_aes_strength) {
+				if (sizeof(salt) < 4 + 4 * efh_aes_strength ||
+					fread(salt, 1, 4+4*efh_aes_strength, fp) != 4+4*efh_aes_strength) {
 						fprintf(stderr, "Error, in fread of file data!\n");
 						goto cleanup;
 				}
@@ -244,7 +246,7 @@ static void process_file(const char *fname)
 					}
 				} else {
 					if (store) cp += sprintf(cp, "ZFILE*%s*"LLx"*"LLx,
-							fname, off_sig, (long long)(ftell(fp)));
+							fname, off_sig, (unsigned long long)(ftell(fp)));
 					fseek(fp, real_cmpr_len, SEEK_CUR);
 				}
 				if (store) cp += sprintf(cp, "*");
@@ -349,7 +351,8 @@ static int LoadZipBlob(FILE *fp, zip_ptr *p, zip_file *zfp, const char *zip_fnam
 	/* unused variables */
 	(void) lastmod_date;
 
-	if (fread(filename, 1, filename_length, fp) != filename_length) {
+	if (sizeof(filename) < filename_length ||
+		fread(filename, 1, filename_length, fp) != filename_length) {
 		fprintf(stderr, "Error, fread could not read the data from the file:  %s\n", zip_fname);
 		return 0;
 	}
@@ -567,12 +570,8 @@ static int usage(char *name) {
 	fprintf(stderr, "    byte checksums, and there are 3 or more of them, then we have 48 bits\n");
 	fprintf(stderr, "    knowledge, which 'may' be enough to crack the password, without having\n");
 	fprintf(stderr, "    to force the user to have the .zip file present\n");
-	fprintf(stderr, " -n Do not look for any magic file types in this zip.  If you know that\n");
-	fprintf(stderr, "    are files with one of the 'magic' extensions, but they are not the right\n");
-	fprintf(stderr, "    type files (some *.doc files that ARE NOT MS Office Word documents), then\n");
-	fprintf(stderr, "    this switch will keep them from being detected this way.  NOTE, that\n");
-	fprintf(stderr, "    the 'magic' logic will only be used in john, under certain situations.\n");
-	fprintf(stderr, "    Most of these situations are when there are only 'stored' files in the zip\n");
+	fprintf(stderr, " -m Use \"file magic\" as known-plain if applicable. This is slightly faster\n");
+	fprintf(stderr, "    but not 100%% safe in all situations.\n");
 	fprintf(stderr, " -2 Force 2 byte checksum computation\n");
 
 	return EXIT_FAILURE;
@@ -606,9 +605,9 @@ int zip2john(int argc, char **argv)
 			checksum_only = 1;
 			fprintf(stderr, "Outputing hashes that are 'checksum ONLY' hashes\n");
 			break;
-		case 'n':
-			use_magic = 0;
-			fprintf(stderr, "Ignoring any checking of file 'magic' signatures\n");
+		case 'm':
+			use_magic = 1;
+			fprintf(stderr, "Using file 'magic' signatures if applicable (not 100%% safe)\n");
 			break;
 		case '2':
 			force_2_byte_checksum = 1;

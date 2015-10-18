@@ -16,20 +16,25 @@ extern struct fmt_main fmt_rawSHA512_ng;
 john_register_one(&fmt_rawSHA512_ng);
 #else
 
-#if !FAST_FORMATS_OMP
-#undef _OPENMP
-#elif _OPENMP
+#if _OPENMP
 #include <omp.h>
 #if __XOP__
+#ifndef OMP_SCALE
 #define OMP_SCALE                 768 /* AMD */
+#endif
 #else
+#ifndef OMP_SCALE
 #define OMP_SCALE                 2048 /* Intel */
 #endif
 #endif
+#endif
 
+#include "misc.h"
+#if !defined(DEBUG) && !defined(WITH_ASAN)
 // These compilers claim to be __GNUC__ but warn on gcc pragmas.
 #if __GNUC__ && !__INTEL_COMPILER && !__clang__ && !__llvm__ && !_MSC_VER
 #pragma GCC optimize 3
+#endif
 #endif
 
 #include "stdint.h"
@@ -47,6 +52,10 @@ john_register_one(&fmt_rawSHA512_ng);
 #define SIMD_TYPE                 "512/512 AVX512 8x"
 #elif __AVX2__
 #define SIMD_TYPE                 "256/256 AVX2 4x"
+#elif __ALTIVEC__
+#define SIMD_TYPE                 "128/128 AltiVec 2x"
+#elif __ARM_NEON__
+#define SIMD_TYPE                 "128/128 NEON 2x"
 #elif __XOP__
 #define SIMD_TYPE                 "128/128 XOP 2x"
 #elif __SSSE3__
@@ -69,7 +78,7 @@ john_register_one(&fmt_rawSHA512_ng);
 #define MAXLEN                    111
 #define PLAINTEXT_LENGTH	  MAXLEN
 #define CIPHERTEXT_LENGTH         128
-#define SHORT_BINARY_SIZE         8
+#define BINARY_SIZE               8
 #define SALT_SIZE                 0
 #define SALT_ALIGN                1
 #define MIN_KEYS_PER_CRYPT        VWIDTH
@@ -77,43 +86,28 @@ john_register_one(&fmt_rawSHA512_ng);
 #define __RAWSHA512_CREATE_PROPER_TESTS_ARRAY__
 #include "rawSHA512_common.h"
 
-#if _MSC_VER && !_M_X64
-// 32 bit VC does NOT define these intrinsics :((((
-_inline __m128i _mm_set_epi64x(uint64_t a, uint64_t b) {
-	__m128i x;
-	x.m128i_u64[0] = b;
-	x.m128i_u64[1] = a;
-	return x;
-}
-_inline __m128i _mm_set1_epi64x(uint64_t a) {
-	__m128i x;
-	x.m128i_u64[0] = a;
-	x.m128i_u64[1] = a;
-	return x;
-}
-#endif
 
 #undef GATHER /* This one is not like the shared ones in pseudo_intrinsics.h */
 
 #if __AVX512F__ || __MIC__
-#define GATHER(x,y,z)                                                     \
-{                                                                         \
-    x = vset_epi64x(y[index + 7][z], y[index + 6][z],                     \
-                    y[index + 5][z], y[index + 4][z],                     \
-                    y[index + 3][z], y[index + 2][z],                     \
-                    y[index + 1][z], y[index + 0][z]);                    \
+#define GATHER(x,y,z)                                                    \
+{                                                                        \
+    x = vset_epi64(y[index + 7][z], y[index + 6][z],                     \
+                   y[index + 5][z], y[index + 4][z],                     \
+                   y[index + 3][z], y[index + 2][z],                     \
+                   y[index + 1][z], y[index + 0][z]);                    \
 }
 
 #elif __AVX2__
-#define GATHER(x,y,z)                                                     \
-{                                                                         \
-    x = vset_epi64x(y[index + 3][z], y[index + 2][z],                     \
-                    y[index + 1][z], y[index    ][z]);                    \
+#define GATHER(x,y,z)                                                    \
+{                                                                        \
+    x = vset_epi64(y[index + 3][z], y[index + 2][z],                     \
+                   y[index + 1][z], y[index    ][z]);                    \
 }
 #else
-#define GATHER(x,y,z)                                                     \
-{                                                                         \
-    x = vset_epi64x(y[index + 1][z], y[index    ][z]);                    \
+#define GATHER(x,y,z)                                                    \
+{                                                                        \
+    x = vset_epi64(y[index + 1][z], y[index    ][z]);                    \
 }
 #endif
 
@@ -161,9 +155,13 @@ _inline __m128i _mm_set1_epi64x(uint64_t a) {
     )                                                                     \
 )
 
+#if !VCMOV_EMULATED
 #define Maj(x,y,z) vcmov(x, y, vxor(z, y))
+#else
+#define Maj(x,y,z) vor(vand(x, y), vand(vor(x, y), z))
+#endif
 
-#define Ch(x,y,z)  vcmov(y, z, x)
+#define Ch(x,y,z) vcmov(y, z, x)
 
 #define R(t)                                                              \
 {                                                                         \
@@ -175,7 +173,7 @@ _inline __m128i _mm_set1_epi64x(uint64_t a) {
 #define SHA512_STEP(a,b,c,d,e,f,g,h,x,K)                                  \
 {                                                                         \
     tmp1 = vadd_epi64(h,    w[x]);                                        \
-    tmp2 = vadd_epi64(S1(e),vset1_epi64x(K));                             \
+    tmp2 = vadd_epi64(S1(e),vset1_epi64(K));                              \
     tmp1 = vadd_epi64(tmp1, Ch(e,f,g));                                   \
     tmp1 = vadd_epi64(tmp1, tmp2);                                        \
     tmp2 = vadd_epi64(S0(a),Maj(a,b,c));                                  \
@@ -216,7 +214,7 @@ static void done(void)
 }
 
 
-static inline void alter_endianity_64(uint64_t *x, unsigned int size)
+static void alter_endianity_64(uint64_t *x, unsigned int size)
 {
     int i;
 
@@ -259,21 +257,21 @@ static char *split(char *ciphertext, int index, struct fmt_main *self)
 static void *get_binary(char *ciphertext)
 {
     static union {
-        unsigned char c[BINARY_SIZE];
-        uint64_t w[BINARY_SIZE / sizeof(uint64_t)];
+        unsigned char c[DIGEST_SIZE];
+        uint64_t w[DIGEST_SIZE / sizeof(uint64_t)];
     } *out;
     int i;
 
     if (!out)
-        out = mem_alloc_tiny(BINARY_SIZE, BINARY_ALIGN);
+        out = mem_alloc_tiny(DIGEST_SIZE, BINARY_ALIGN);
 
     ciphertext += TAG_LENGTH;
 
-    for (i=0; i < BINARY_SIZE; i++)
+    for (i=0; i < DIGEST_SIZE; i++)
         out->c[i] = atoi16[ARCH_INDEX(ciphertext[i*2])] * 16 +
                     atoi16[ARCH_INDEX(ciphertext[i*2 + 1])];
 
-    alter_endianity_64(out->w, BINARY_SIZE);
+    alter_endianity_64(out->w, DIGEST_SIZE);
 
     out->w[0] -= 0x6a09e667f3bcc908ULL;
     out->w[1] -= 0xbb67ae8584caa73bULL;
@@ -287,13 +285,13 @@ static void *get_binary(char *ciphertext)
     return (void *) out;
 }
 
-static int get_hash_0(int index) { return crypt_key[0][index] & 0xf; }
-static int get_hash_1(int index) { return crypt_key[0][index] & 0xff; }
-static int get_hash_2(int index) { return crypt_key[0][index] & 0xfff; }
-static int get_hash_3(int index) { return crypt_key[0][index] & 0xffff; }
-static int get_hash_4(int index) { return crypt_key[0][index] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_key[0][index] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_key[0][index] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_key[0][index] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_key[0][index] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_key[0][index] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_key[0][index] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_key[0][index] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_key[0][index] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_key[0][index] & PH_MASK_6; }
 
 
 static void set_key(char *key, int index)
@@ -357,14 +355,14 @@ static int crypt_all(int *pcount, struct db_salt *salt)
         GATHER(w[15], saved_key, 15);
         for (i = 16; i < 80; i++) R(i);
 
-        a = vset1_epi64x(0x6a09e667f3bcc908ULL);
-        b = vset1_epi64x(0xbb67ae8584caa73bULL);
-        c = vset1_epi64x(0x3c6ef372fe94f82bULL);
-        d = vset1_epi64x(0xa54ff53a5f1d36f1ULL);
-        e = vset1_epi64x(0x510e527fade682d1ULL);
-        f = vset1_epi64x(0x9b05688c2b3e6c1fULL);
-        g = vset1_epi64x(0x1f83d9abfb41bd6bULL);
-        h = vset1_epi64x(0x5be0cd19137e2179ULL);
+        a = vset1_epi64(0x6a09e667f3bcc908ULL);
+        b = vset1_epi64(0xbb67ae8584caa73bULL);
+        c = vset1_epi64(0x3c6ef372fe94f82bULL);
+        d = vset1_epi64(0xa54ff53a5f1d36f1ULL);
+        e = vset1_epi64(0x510e527fade682d1ULL);
+        f = vset1_epi64(0x9b05688c2b3e6c1fULL);
+        g = vset1_epi64(0x1f83d9abfb41bd6bULL);
+        h = vset1_epi64(0x5be0cd19137e2179ULL);
 
         SHA512_STEP(a, b, c, d, e, f, g, h,  0, 0x428a2f98d728ae22ULL);
         SHA512_STEP(h, a, b, c, d, e, f, g,  1, 0x7137449123ef65cdULL);
@@ -511,16 +509,14 @@ struct fmt_main fmt_rawSHA512_ng = {
         BENCHMARK_LENGTH,
         0,
         MAXLEN,
-        SHORT_BINARY_SIZE,
+        BINARY_SIZE,
         BINARY_ALIGN,
         SALT_SIZE,
         SALT_ALIGN,
         MIN_KEYS_PER_CRYPT,
         MAX_KEYS_PER_CRYPT,
-        FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
+        FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_OMP | FMT_OMP_BAD,
 		{ NULL },
-#endif
         sha512_common_tests
     }, {
         init,
@@ -531,9 +527,7 @@ struct fmt_main fmt_rawSHA512_ng = {
         split,
         get_binary,
         fmt_default_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
         fmt_default_source,
         {
 		fmt_default_binary_hash_0,

@@ -19,7 +19,7 @@ john_register_one(&fmt_opencl_office2007);
 #else
 
 #include "sha.h"
-#include <openssl/aes.h>
+#include "aes.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,9 +55,6 @@ john_register_one(&fmt_opencl_office2007);
 #define MIN_KEYS_PER_CRYPT	1
 #define MAX_KEYS_PER_CRYPT	1
 
-#define MIN(a, b)		(((a) > (b)) ? (b) : (a))
-#define MAX(a, b)		(((a) > (b)) ? (a) : (b))
-
 static struct fmt_tests tests[] = {
 	{"$office$*2007*20*128*16*8b2c9e8c878844fc842012273be4bea8*aa862168b80d8c45c852696a8bb499eb*a413507fabe2d87606595f987f679ff4b5b4c2cd", "Password"},
 	/* 2007-Default_myhovercraftisfullofeels_.docx */
@@ -78,7 +75,6 @@ static struct fmt_tests tests[] = {
 static ms_office_custom_salt *cur_salt;
 
 static ARCH_WORD_32 (*crypt_key)[4];
-static unsigned int v_width = 1;	/* Vector width of kernel */
 
 static char *saved_key;	/* Password encoded in UCS-2 */
 static int *saved_len;	/* UCS-2 password length, in octets */
@@ -117,32 +113,12 @@ static size_t get_task_max_work_group_size()
 	return s;
 }
 
-static size_t get_task_max_size()
-{
-	return 0;
-}
-
-static size_t get_default_workgroup()
-{
-#if 1
-	return get_task_max_work_group_size(); // GTX980: 58975 c/s
-#elif 1
-	return 0; // 58975 c/s
-#else
-	if (cpu(device_info[gpu_id]))
-		return get_platform_vendor_id(platform_id) == DEV_INTEL ?
-			8 : 1;
-	else
-		return 64; // 55072 c/s
-#endif
-}
-
 static void create_clobj(size_t gws, struct fmt_main *self)
 {
 	int i;
 	int bench_len = strlen(tests[0].plaintext) * 2;
 
-	gws *= v_width;
+	gws *= ocl_v_width;
 
 	pinned_saved_key = clCreateBuffer(context[gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, UNICODE_LENGTH * gws, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error allocating page-locked memory");
@@ -195,39 +171,45 @@ static void create_clobj(size_t gws, struct fmt_main *self)
 
 static void release_clobj(void)
 {
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_key, key, 0, NULL, NULL), "Error Unmapping key");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_saved_key, saved_key, 0, NULL, NULL), "Error Unmapping saved_key");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_saved_len, saved_len, 0, NULL, NULL), "Error Unmapping saved_len");
-	HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_salt, saved_salt, 0, NULL, NULL), "Error Unmapping saved_salt");
-	HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error releasing memory mappings");
+	if (crypt_key) {
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_key, key, 0, NULL, NULL), "Error Unmapping key");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_saved_key, saved_key, 0, NULL, NULL), "Error Unmapping saved_key");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_saved_len, saved_len, 0, NULL, NULL), "Error Unmapping saved_len");
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[gpu_id], pinned_salt, saved_salt, 0, NULL, NULL), "Error Unmapping saved_salt");
+		HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error releasing memory mappings");
 
-	HANDLE_CLERROR(clReleaseMemObject(pinned_key), "Release GPU buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_key), "Release GPU buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_len), "Release GPU buffer");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_salt), "Release GPU buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_key), "Release GPU buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saved_key), "Release GPU buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_saved_len), "Release GPU buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_salt), "Release GPU buffer");
-	HANDLE_CLERROR(clReleaseMemObject(cl_pwhash), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_key), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_saved_key), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_saved_len), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(pinned_salt), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_key), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saved_key), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_saved_len), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_salt), "Release GPU buffer");
+		HANDLE_CLERROR(clReleaseMemObject(cl_pwhash), "Release GPU buffer");
 
-	MEM_FREE(crypt_key);
+		MEM_FREE(crypt_key);
+	}
 }
 
 static void done(void)
 {
-	release_clobj();
+	if (autotuned) {
+		release_clobj();
 
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(GenerateSHA1pwhash), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(Generate2007key), "Release kernel");
-	HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+		HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
+		HANDLE_CLERROR(clReleaseKernel(GenerateSHA1pwhash), "Release kernel");
+		HANDLE_CLERROR(clReleaseKernel(Generate2007key), "Release kernel");
+		HANDLE_CLERROR(clReleaseProgram(program[gpu_id]), "Release Program");
+
+		autotuned--;
+	}
 }
 
 static void clear_keys(void)
 {
-	memset(saved_key, 0, UNICODE_LENGTH * global_work_size * v_width);
-	memset(saved_len, 0, sizeof(*saved_len) * global_work_size * v_width);
+	memset(saved_key, 0, UNICODE_LENGTH * global_work_size * ocl_v_width);
+	memset(saved_len, 0, sizeof(*saved_len) * global_work_size * ocl_v_width);
 }
 
 static void set_key(char *key, int index)
@@ -255,39 +237,20 @@ static void set_salt(void *salt)
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_salt, CL_FALSE, 0, SALT_LENGTH, saved_salt, 0, NULL, NULL), "failed in clEnqueueWriteBuffer saved_salt");
 }
 
-static int crypt_all(int *pcount, struct db_salt *salt);
-static int crypt_all_benchmark(int *pcount, struct db_salt *salt);
-
 static void init(struct fmt_main *_self)
 {
-	char build_opts[64];
 	static char valgo[32] = "";
 
 	self = _self;
 
-	if ((v_width = opencl_get_vector_width(gpu_id,
+	opencl_prepare_dev(gpu_id);
+	if ((ocl_v_width = opencl_get_vector_width(gpu_id,
 	                                       sizeof(cl_int))) > 1) {
 		/* Run vectorized kernel */
 		snprintf(valgo, sizeof(valgo),
-		         OCL_ALGORITHM_NAME " %ux" CPU_ALGORITHM_NAME, v_width);
+		         OCL_ALGORITHM_NAME " %ux" CPU_ALGORITHM_NAME, ocl_v_width);
 		self->params.algorithm_name = valgo;
 	}
-
-	snprintf(build_opts, sizeof(build_opts),
-	         "-DHASH_LOOPS=%u -DUNICODE_LENGTH=%u -DV_WIDTH=%u",
-	         HASH_LOOPS,
-	         UNICODE_LENGTH,
-	         v_width);
-	opencl_init("$JOHN/kernels/office2007_kernel.cl", gpu_id,
-	            build_opts);
-
-	// create kernel to execute
-	GenerateSHA1pwhash = clCreateKernel(program[gpu_id], "GenerateSHA1pwhash", &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
-	crypt_kernel = clCreateKernel(program[gpu_id], "HashLoop", &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
-	Generate2007key = clCreateKernel(program[gpu_id], "Generate2007key", &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
 	if (pers_opts.target_enc == UTF_8)
 		self->params.plaintext_length = MIN(125, 3 * PLAINTEXT_LENGTH);
@@ -295,18 +258,34 @@ static void init(struct fmt_main *_self)
 
 static void reset(struct db_main *db)
 {
-	if (!db) {
+	if (!autotuned) {
+		char build_opts[64];
+
+		snprintf(build_opts, sizeof(build_opts),
+		         "-DHASH_LOOPS=%u -DUNICODE_LENGTH=%u -DV_WIDTH=%u",
+		         HASH_LOOPS,
+		         UNICODE_LENGTH,
+		         ocl_v_width);
+		opencl_init("$JOHN/kernels/office2007_kernel.cl", gpu_id,
+		            build_opts);
+
+		// create kernel to execute
+		GenerateSHA1pwhash = clCreateKernel(program[gpu_id], "GenerateSHA1pwhash", &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+		crypt_kernel = clCreateKernel(program[gpu_id], "HashLoop", &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+		Generate2007key = clCreateKernel(program[gpu_id], "Generate2007key", &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+
 		// Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, HASH_LOOPS, split_events, warn,
 		                       3, self, create_clobj, release_clobj,
-		                       v_width * UNICODE_LENGTH, 0);
+		                       ocl_v_width * UNICODE_LENGTH, 0);
 
 		// Auto tune execution from shared/included code.
-		self->methods.crypt_all = crypt_all_benchmark;
 		autotune_run(self, ITERATIONS + 4, 0,
 		             (cpu(device_info[gpu_id]) ?
 		              1000000000 : 10000000000ULL));
-		self->methods.crypt_all = crypt_all;
 	}
 }
 
@@ -315,58 +294,38 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	const int count = *pcount;
 	int index;
 	size_t gws, scalar_gws;
+	size_t *lws = local_work_size ? &local_work_size : NULL;
 
-	gws = ((count + (v_width * local_work_size - 1)) / (v_width * local_work_size)) * local_work_size;
-	scalar_gws = gws * v_width;
+	gws = GET_MULTIPLE_OR_BIGGER_VW(count, local_work_size);
+	scalar_gws = gws * ocl_v_width;
 
-	if (new_keys) {
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, 0, UNICODE_LENGTH * scalar_gws, saved_key, 0, NULL, NULL), "failed in clEnqueueWriteBuffer saved_key");
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_len, CL_FALSE, 0, sizeof(int) * scalar_gws, saved_len, 0, NULL, NULL), "failed in clEnqueueWriteBuffer saved_len");
+	if (ocl_autotune_running || new_keys) {
+		BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, 0, UNICODE_LENGTH * scalar_gws, saved_key, 0, NULL, multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer saved_key");
+		BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_len, CL_FALSE, 0, sizeof(int) * scalar_gws, saved_len, 0, NULL, multi_profilingEvent[1]), "failed in clEnqueueWriteBuffer saved_len");
 		new_keys = 0;
 	}
 
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], GenerateSHA1pwhash, 1, NULL, &scalar_gws, &local_work_size, 0, NULL, firstEvent), "failed in clEnqueueNDRangeKernel");
-
-	for (index = 0; index < 50000 / HASH_LOOPS; index++) {
-		HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &gws, &local_work_size, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel");
-		HANDLE_CLERROR(clFinish(queue[gpu_id]), "Error running loop kernel");
-		opencl_process_event();
-	}
-
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], Generate2007key, 1, NULL, &gws, &local_work_size, 0, NULL, lastEvent), "failed in clEnqueueNDRangeKernel");
-
-	// read back aes key
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_key, CL_TRUE, 0, 16 * scalar_gws, key, 0, NULL, NULL), "failed in reading key back");
-
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-	for (index = 0; index < count; index++)
-		ms_office_common_PasswordVerifier(cur_salt, &key[index*16], crypt_key[index]);
-	return count;
-}
-
-static int crypt_all_benchmark(int *pcount, struct db_salt *salt)
-{
-	int count = *pcount;
-	size_t gws, scalar_gws;
-	size_t *lws = local_work_size ? &local_work_size : NULL;
-
-	gws = ((count + (v_width * (local_work_size ? local_work_size : 1) - 1)) / (v_width * (local_work_size ? local_work_size : 1))) * (local_work_size ? local_work_size : 1);
-	scalar_gws = gws * v_width;
-
-	BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_key, CL_FALSE, 0, UNICODE_LENGTH * scalar_gws, saved_key, 0, NULL, multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer saved_key");
-	BENCH_CLERROR(clEnqueueWriteBuffer(queue[gpu_id], cl_saved_len, CL_FALSE, 0, sizeof(int) * scalar_gws, saved_len, 0, NULL, multi_profilingEvent[1]), "failed in clEnqueueWriteBuffer saved_len");
-
 	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], GenerateSHA1pwhash, 1, NULL, &scalar_gws, lws, 0, NULL, multi_profilingEvent[2]), "failed in clEnqueueNDRangeKernel");
 
-	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &gws, lws, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel");
-	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &gws, lws, 0, NULL, multi_profilingEvent[3]), "failed in clEnqueueNDRangeKernel");
+	for (index = 0; index < (ocl_autotune_running ? 1 : 50000 / HASH_LOOPS); index++) {
+		BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], crypt_kernel, 1, NULL, &gws, lws, 0, NULL, multi_profilingEvent[3]), "failed in clEnqueueNDRangeKernel");
+		BENCH_CLERROR(clFinish(queue[gpu_id]), "Error running loop kernel");
+		opencl_process_event();
+	}
 
 	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[gpu_id], Generate2007key, 1, NULL, &gws, lws, 0, NULL, multi_profilingEvent[4]), "failed in clEnqueueNDRangeKernel");
 
 	// read back aes key
 	BENCH_CLERROR(clEnqueueReadBuffer(queue[gpu_id], cl_key, CL_TRUE, 0, 16 * scalar_gws, key, 0, NULL, multi_profilingEvent[5]), "failed in reading key back");
+
+	if (!ocl_autotune_running) {
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+		for (index = 0; index < count; index++)
+			ms_office_common_PasswordVerifier(cur_salt, &key[index*16],
+			                                  crypt_key[index]);
+	}
 
 	return count;
 }
@@ -391,13 +350,13 @@ static int cmp_exact(char *source, int index)
 	return 1;
 }
 
-static int get_hash_0(int index) { return crypt_key[index][0] & 0xf; }
-static int get_hash_1(int index) { return crypt_key[index][0] & 0xff; }
-static int get_hash_2(int index) { return crypt_key[index][0] & 0xfff; }
-static int get_hash_3(int index) { return crypt_key[index][0] & 0xffff; }
-static int get_hash_4(int index) { return crypt_key[index][0] & 0xfffff; }
-static int get_hash_5(int index) { return crypt_key[index][0] & 0xffffff; }
-static int get_hash_6(int index) { return crypt_key[index][0] & 0x7ffffff; }
+static int get_hash_0(int index) { return crypt_key[index][0] & PH_MASK_0; }
+static int get_hash_1(int index) { return crypt_key[index][0] & PH_MASK_1; }
+static int get_hash_2(int index) { return crypt_key[index][0] & PH_MASK_2; }
+static int get_hash_3(int index) { return crypt_key[index][0] & PH_MASK_3; }
+static int get_hash_4(int index) { return crypt_key[index][0] & PH_MASK_4; }
+static int get_hash_5(int index) { return crypt_key[index][0] & PH_MASK_5; }
+static int get_hash_6(int index) { return crypt_key[index][0] & PH_MASK_6; }
 
 static char *get_key(int index)
 {
@@ -424,9 +383,7 @@ struct fmt_main fmt_opencl_office2007 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_UNICODE | FMT_UTF8 | FMT_OMP,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -437,9 +394,7 @@ struct fmt_main fmt_opencl_office2007 = {
 		fmt_default_split,
 		ms_office_common_binary,
 		ms_office_common_get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

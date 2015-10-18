@@ -16,15 +16,17 @@ john_register_one(&fmt_XSHA);
 #include "arch.h"
 
 #ifdef SIMD_COEF_32
-#define NBKEYS				(SIMD_COEF_32 * SHA1_SSE_PARA)
+#define NBKEYS				(SIMD_COEF_32 * SIMD_PARA_SHA1)
 
 #ifdef _OPENMP
 static unsigned int omp_t = 1;
 #include <omp.h>
+#ifndef OMP_SCALE
 #define OMP_SCALE			128
 #endif
 #endif
-#include "sse-intrinsics.h"
+#endif
+#include "simd-intrinsics.h"
 
 #include "params.h"
 #include "common.h"
@@ -73,6 +75,9 @@ static struct fmt_tests tests[] = {
 	{"01295B67659E95F32931CEDB3BA50289E2826AF3D5A1422F", "apple"},
 	{"0E6A48F765D0FFFFF6247FA80D748E615F91DD0C7431E4D9", "macintosh"},
 	{"A320163F1E6DB42C3949F7E232888ACC7DB7A0A17E493DBA", "test"},
+	{"743777471285CB3566886D4821D556E475E0DF9234308B22", "123"},
+	{"474379622BD7B9F84BD6E4BB52ABF9D01705EFB0A2426655", "passWOrd"},
+	{"597A523666A10C534495DB6333CF7EBA70C1A578CADE11A3", ""},
 	{NULL}
 };
 
@@ -175,84 +180,84 @@ static int get_hash_0(int index)
 	unsigned int x,y;
         x = index&(SIMD_COEF_32-1);
         y = (unsigned int)index/SIMD_COEF_32;
-	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & 0xf;
+	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & PH_MASK_0;
 }
 static int get_hash_1(int index)
 {
 	unsigned int x,y;
         x = index&(SIMD_COEF_32-1);
         y = (unsigned int)index/SIMD_COEF_32;
-	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & 0xff;
+	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & PH_MASK_1;
 }
 static int get_hash_2(int index)
 {
 	unsigned int x,y;
         x = index&(SIMD_COEF_32-1);
         y = (unsigned int)index/SIMD_COEF_32;
-	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & 0xfff;
+	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & PH_MASK_2;
 }
 static int get_hash_3(int index)
 {
 	unsigned int x,y;
         x = index&(SIMD_COEF_32-1);
         y = (unsigned int)index/SIMD_COEF_32;
-	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & 0xffff;
+	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & PH_MASK_3;
 }
 static int get_hash_4(int index)
 {
 	unsigned int x,y;
         x = index&(SIMD_COEF_32-1);
         y = (unsigned int)index/SIMD_COEF_32;
-	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & 0xfffff;
+	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & PH_MASK_4;
 }
 static int get_hash_5(int index)
 {
 	unsigned int x,y;
         x = index&(SIMD_COEF_32-1);
         y = (unsigned int)index/SIMD_COEF_32;
-	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & 0xffffff;
+	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & PH_MASK_5;
 }
 static int get_hash_6(int index)
 {
 	unsigned int x,y;
         x = index&(SIMD_COEF_32-1);
         y = (unsigned int)index/SIMD_COEF_32;
-	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & 0x7ffffff;
+	return ((ARCH_WORD_32*)crypt_key)[x+y*SIMD_COEF_32*5] & PH_MASK_6;
 }
 #else
 static int get_hash_0(int index)
 {
-	return crypt_out[index][0] & 0xF;
+	return crypt_out[index][0] & PH_MASK_0;
 }
 
 static int get_hash_1(int index)
 {
-	return crypt_out[index][0] & 0xFF;
+	return crypt_out[index][0] & PH_MASK_1;
 }
 
 static int get_hash_2(int index)
 {
-	return crypt_out[index][0] & 0xFFF;
+	return crypt_out[index][0] & PH_MASK_2;
 }
 
 static int get_hash_3(int index)
 {
-	return crypt_out[index][0] & 0xFFFF;
+	return crypt_out[index][0] & PH_MASK_3;
 }
 
 static int get_hash_4(int index)
 {
-	return crypt_out[index][0] & 0xFFFFF;
+	return crypt_out[index][0] & PH_MASK_4;
 }
 
 static int get_hash_5(int index)
 {
-	return crypt_out[index][0] & 0xFFFFFF;
+	return crypt_out[index][0] & PH_MASK_5;
 }
 
 static int get_hash_6(int index)
 {
-	return crypt_out[index][0] & 0x7FFFFFF;
+	return crypt_out[index][0] & PH_MASK_6;
 }
 #endif
 
@@ -274,7 +279,13 @@ static void set_salt(void *salt)
 static void set_key(char *key, int index)
 {
 #ifdef SIMD_COEF_32
+#if ARCH_ALLOWS_UNALIGNED
 	const ARCH_WORD_32 *wkey = (ARCH_WORD_32*)key;
+#else
+	char buf_aligned[PLAINTEXT_LENGTH + 1] JTR_ALIGN(sizeof(uint32_t));
+	const ARCH_WORD_32 *wkey = (uint32_t*)(is_aligned(key, sizeof(uint32_t)) ?
+	                                       key : strcpy(buf_aligned, key));
+#endif
 	ARCH_WORD_32 *keybuffer = &saved_key[(index&(SIMD_COEF_32-1)) + (unsigned int)index/SIMD_COEF_32*SHA_BUF_SIZ*SIMD_COEF_32 + SIMD_COEF_32];
 	ARCH_WORD_32 *keybuf_word = keybuffer;
 	unsigned int len;
@@ -355,7 +366,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		unsigned int j;
 		for (j=0; j < NBKEYS; j++)
 			in[(j&(SIMD_COEF_32-1)) + j/SIMD_COEF_32*SHA_BUF_SIZ*SIMD_COEF_32] = cur_salt;
-		SSESHA1body(in, out, NULL, SSEi_MIXED_IN);
+		SIMDSHA1body(in, out, NULL, SSEi_MIXED_IN);
 #if defined(_OPENMP)
 	}
 #endif
@@ -383,9 +394,9 @@ static int cmp_all(void *binary, int count)
 	unsigned int x,y=0;
 
 #ifdef _OPENMP
-	for(;y<SHA1_SSE_PARA*omp_t;y++)
+	for(;y<SIMD_PARA_SHA1*omp_t;y++)
 #else
-	for(;y<SHA1_SSE_PARA;y++)
+	for(;y<SIMD_PARA_SHA1;y++)
 #endif
 	for(x=0;x<SIMD_COEF_32;x++)
 	{
@@ -450,10 +461,8 @@ struct fmt_main fmt_XSHA = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		FMT_OMP | FMT_CASE | FMT_8_BIT,
-#if FMT_MAIN_VERSION > 11
+		FMT_OMP | FMT_OMP_BAD | FMT_CASE | FMT_8_BIT,
 		{ NULL },
-#endif
 		tests
 	}, {
 		init,
@@ -464,9 +473,7 @@ struct fmt_main fmt_XSHA = {
 		fmt_default_split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{ NULL },
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

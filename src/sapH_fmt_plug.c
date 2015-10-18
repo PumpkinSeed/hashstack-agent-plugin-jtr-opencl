@@ -30,7 +30,7 @@ john_register_one(&fmt_sapH);
 /* for now, undef this until I get OMP working, then start on SIMD */
 //#undef _OPENMP
 //#undef SIMD_COEF_32
-//#undef SHA1_SSE_PARA
+//#undef SIMD_PARA_SHA1
 //#undef SIMD_COEF_32
 //#undef SIMD_PARA_SHA256
 //#undef SIMD_COEF_64
@@ -47,21 +47,25 @@ john_register_one(&fmt_sapH);
 #if defined(_OPENMP)
 #include <omp.h>
 #ifdef SIMD_COEF_32
+#ifndef OMP_SCALE
 #define OMP_SCALE			8
+#endif
 #else
+#ifndef OMP_SCALE
 #define OMP_SCALE			64
+#endif
 #endif
 #endif
 
 /*
- * Assumption is made that SIMD_COEF_32*SHA1_SSE_PARA is >= than
+ * Assumption is made that SIMD_COEF_32*SIMD_PARA_SHA1 is >= than
  * SHA256_COEF*PARA and SHA512_COEF*PARA, and that these other 2
  * will evenly divide the SIMD_COEF_32*SHA1_SSRE_PARA value.
- * Works with current code. BUT if SHA1_SSE_PARA was 3 and
+ * Works with current code. BUT if SIMD_PARA_SHA1 was 3 and
  * SIMD_PARA_SHA256 was 2, then we would have problems.
  */
 #ifdef SIMD_COEF_32
-#define NBKEYS1	(SIMD_COEF_32 * SHA1_SSE_PARA)
+#define NBKEYS1	(SIMD_COEF_32 * SIMD_PARA_SHA1)
 #else
 #define NBKEYS1 1
 #endif
@@ -78,7 +82,10 @@ john_register_one(&fmt_sapH);
 #define NBKEYS512 1
 #endif
 
-#include "sse-intrinsics.h"
+// the least common multiple of the NBKEYS* above
+#define NBKEYS (SIMD_COEF_32*SIMD_PARA_SHA1*SIMD_PARA_SHA256*SIMD_PARA_SHA512)
+
+#include "simd-intrinsics.h"
 
 #define FORMAT_LABEL            "saph"
 #define FORMAT_NAME             "SAP CODVN H (PWDSALTEDHASH)"
@@ -104,11 +111,12 @@ john_register_one(&fmt_sapH);
 #define SALT_ALIGN              4
 
 /* NOTE, format is slow enough that endianity conversion is pointless. Just use flat buffers. */
-#define MIN_KEYS_PER_CRYPT		1
 #ifdef SIMD_COEF_32
-#define MAX_KEYS_PER_CRYPT		NBKEYS1
+#define MIN_KEYS_PER_CRYPT		NBKEYS
+#define MAX_KEYS_PER_CRYPT		NBKEYS
 #define PLAINTEXT_LENGTH        23
 #else
+#define MIN_KEYS_PER_CRYPT		1
 #define MAX_KEYS_PER_CRYPT		1
 #define PLAINTEXT_LENGTH        125
 #endif
@@ -194,15 +202,16 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	if (!isdecu(cp))
 		goto err;
 
-	if ((cp = strtokm(NULL, " ")) == NULL)
+	// we want the entire rest of the line here, to mime compare.
+	if ((cp = strtokm(NULL, "")) == NULL)
 		goto err;
 	if (strlen(cp) != base64_valid_length(cp, e_b64_mime, flg_Base64_MIME_TRAIL_EQ|flg_Base64_MIME_TRAIL_EQ_CNT))
-		return 0;
+		goto err;
 	len = base64_convert(cp, e_b64_mime, strlen(cp), tmp, e_b64_raw,
 	                     MAX_BINARY_SIZE+SALT_LENGTH, flg_Base64_MIME_TRAIL_EQ);
 	len -= hash_len;
 	if (len < 1 || len > SALT_LENGTH)
-		return 0;
+		goto err;
 
 	MEM_FREE(keeptr);
 	return 1;
@@ -295,7 +304,7 @@ static void crypt_all_1(int count) {
 		}
 		for (i = 1; i < sapH_cur_salt->iter; ++i) {
 			uint32_t k;
-			SSESHA1body(keys, crypt32, NULL, SSEi_FLAT_IN);
+			SIMDSHA1body(keys, crypt32, NULL, SSEi_FLAT_IN);
 			for (k = 0; k < NBKEYS1; ++k) {
 				uint32_t *pcrypt = &crypt32[ ((k/SIMD_COEF_32)*(SIMD_COEF_32*5)) + (k&(SIMD_COEF_32-1))];
 				uint32_t *Icp32 = (uint32_t *)(&keys[(k<<6)+offs[k]]);
@@ -319,7 +328,7 @@ static void crypt_all_1(int count) {
 	}
 }
 static void crypt_all_256(int count) {
-	uint32_t idx;
+	int idx;
 #if defined(_OPENMP)
 #pragma omp parallel for default(none) private(idx) shared(count, sapH_cur_salt, saved_plain, crypt_key)
 #endif
@@ -367,7 +376,7 @@ static void crypt_all_256(int count) {
 		}
 		for (i = 1; i < sapH_cur_salt->iter; ++i) {
 			uint32_t k;
-			SSESHA256body(keys, crypt32, NULL, SSEi_FLAT_IN);
+			SIMDSHA256body(keys, crypt32, NULL, SSEi_FLAT_IN);
 			for (k = 0; k < NBKEYS256; ++k) {
 				uint32_t *pcrypt = &crypt32[ ((k/SIMD_COEF_32)*(SIMD_COEF_32*8)) + (k&(SIMD_COEF_32-1))];
 				uint32_t *Icp32 = (uint32_t *)(&keys[(k<<6)+offs[k]]);
@@ -391,7 +400,7 @@ static void crypt_all_256(int count) {
 	}
 }
 static void crypt_all_384(int count) {
-	uint32_t idx;
+	int idx;
 #if defined(_OPENMP)
 #pragma omp parallel for default(none) private(idx) shared(count, sapH_cur_salt, saved_plain, crypt_key)
 #endif
@@ -440,7 +449,7 @@ static void crypt_all_384(int count) {
 		}
 		for (i = 1; i < sapH_cur_salt->iter; ++i) {
 			uint32_t k;
-			SSESHA512body(keys, crypt64, NULL, SSEi_FLAT_IN|SSEi_CRYPT_SHA384);
+			SIMDSHA512body(keys, crypt64, NULL, SSEi_FLAT_IN|SSEi_CRYPT_SHA384);
 			for (k = 0; k < NBKEYS512; ++k) {
 				ARCH_WORD_64 *pcrypt = &crypt64[ ((k/SIMD_COEF_64)*(SIMD_COEF_64*8)) + (k&(SIMD_COEF_64-1))];
 				ARCH_WORD_64 *Icp64 = (ARCH_WORD_64 *)(&keys[(k<<7)+offs[k]]);
@@ -464,7 +473,7 @@ static void crypt_all_384(int count) {
 	}
 }
 static void crypt_all_512(int count) {
-	uint32_t idx;
+	int idx;
 #if defined(_OPENMP)
 #pragma omp parallel for default(none) private(idx) shared(count, sapH_cur_salt, saved_plain, crypt_key)
 #endif
@@ -512,7 +521,7 @@ static void crypt_all_512(int count) {
 		}
 		for (i = 1; i < sapH_cur_salt->iter; ++i) {
 			uint32_t k;
-			SSESHA512body(keys, crypt64, NULL, SSEi_FLAT_IN);
+			SIMDSHA512body(keys, crypt64, NULL, SSEi_FLAT_IN);
 			for (k = 0; k < NBKEYS512; ++k) {
 				ARCH_WORD_64 *pcrypt = &crypt64[ ((k/SIMD_COEF_64)*(SIMD_COEF_64*8)) + (k&(SIMD_COEF_64-1))];
 				ARCH_WORD_64 *Icp64 = (ARCH_WORD_64 *)(&keys[(k<<7)+offs[k]]);
@@ -605,13 +614,13 @@ static char *split(char *ciphertext, int index, struct fmt_main *self)
 	return ciphertext;
 }
 
-static int get_hash_0(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xF; }
-static int get_hash_1(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFF; }
-static int get_hash_2(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFF; }
-static int get_hash_3(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFF; }
-static int get_hash_4(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFFF; }
-static int get_hash_5(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0xFFFFFF; }
-static int get_hash_6(int index) { return *(ARCH_WORD_32*)crypt_key[index] & 0x7FFFFFF; }
+static int get_hash_0(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_0; }
+static int get_hash_1(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_1; }
+static int get_hash_2(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_2; }
+static int get_hash_3(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_3; }
+static int get_hash_4(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_4; }
+static int get_hash_5(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_5; }
+static int get_hash_6(int index) { return *(ARCH_WORD_32*)crypt_key[index] & PH_MASK_6; }
 
 static int salt_hash(void *salt)
 {
@@ -625,7 +634,6 @@ static int salt_hash(void *salt)
 	return hash & (SALT_HASH_SIZE - 1);
 }
 
-#if FMT_MAIN_VERSION > 11
 static unsigned int sapH_type(void *salt)
 {
 	struct sapH_salt *my_salt;
@@ -640,7 +648,6 @@ static unsigned int iteration_count(void *salt)
 	my_salt = (struct sapH_salt *)salt;
 	return my_salt->iter;
 }
-#endif
 struct fmt_main fmt_sapH = {
 	{
 		FORMAT_LABEL,
@@ -656,13 +663,11 @@ struct fmt_main fmt_sapH = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		FMT_OMP | FMT_8_BIT,
-#if FMT_MAIN_VERSION > 11
+		FMT_OMP | FMT_CASE | FMT_8_BIT | FMT_UTF8,
 		{
 			"hash type [1:sha1 2:SHA256 3:SHA384 4:SHA512]",
 			"iteration count",
 		},
-#endif
 		tests
 	}, {
 		init,
@@ -673,12 +678,10 @@ struct fmt_main fmt_sapH = {
 		split,
 		get_binary,
 		get_salt,
-#if FMT_MAIN_VERSION > 11
 		{
 			sapH_type,
 			iteration_count,
 		},
-#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,
