@@ -62,18 +62,6 @@ static struct fmt_main *self;
 #define MIN_KEYS_PER_CRYPT      1
 #define MAX_KEYS_PER_CRYPT      1
 
-#define get_power_of_two(v)	\
-{				\
-	v--;			\
-	v |= v >> 1;		\
-	v |= v >> 2;		\
-	v |= v >> 4;		\
-	v |= v >> 8;		\
-	v |= v >> 16;		\
-	v |= v >> 32;		\
-	v++;			\
-}
-
 #include "memdbg.h"
 
 static struct fmt_tests tests[] = {
@@ -577,7 +565,7 @@ static void auto_tune(struct db_main *db, long double kernel_run_ms)
 	assert(global_work_size <= gws_limit);
 
 	self->params.max_keys_per_crypt = global_work_size;
-	if (options.verbosity > 3)
+	if (options.verbosity > VERB_DEFAULT)
 	fprintf(stdout, "%s GWS: "Zu", LWS: "Zu"\n", db ? "Cracking" : "Self test",
 			global_work_size, local_work_size);
 #undef calc_ms

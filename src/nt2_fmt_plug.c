@@ -96,6 +96,10 @@ static char *source(char *source, void *binary)
 	md4_unreverse(b);
 #endif
 
+#if ARCH_LITTLE_ENDIAN==0
+	alter_endianity(b, 16);
+#endif
+
 	p = &out[TAG_LENGTH];
 	for (i = 0; i < 4; i++)
 		for (j = 0; j < 8; j++)
@@ -177,7 +181,7 @@ static void init(struct fmt_main *self)
 	omp_t *= OMP_SCALE;
 	self->params.max_keys_per_crypt *= omp_t;
 #endif
-	if (pers_opts.target_enc == UTF_8) {
+	if (options.target_enc == UTF_8) {
 		/* This avoids an if clause for every set_key */
 		self->methods.set_key = set_key_utf8;
 #if SIMD_COEF_32
@@ -193,7 +197,7 @@ static void init(struct fmt_main *self)
 		tests[4].plaintext = "\xE2\x82\xAC\xE2\x82\xAC";
 		tests[4].ciphertext = "$NT$682467b963bb4e61943e170a04f7db46";
 	} else {
-		if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+		if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 			/* This avoids an if clause for every set_key */
 			self->methods.set_key = set_key_CP;
 		}
@@ -293,17 +297,17 @@ static void *get_binary(char *ciphertext)
 	ciphertext+=4;
 	for (i=0; i<4; i++)
 	{
-		temp  = (atoi16[ARCH_INDEX(ciphertext[i*8+0])])<<4;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+1])]);
+		temp  = ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+0])]))<<4;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+1])]));
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+2])])<<12;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+3])])<<8;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+2])]))<<12;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+3])]))<<8;
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+4])])<<20;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+5])])<<16;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+4])]))<<20;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+5])]))<<16;
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+6])])<<28;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+7])])<<24;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+6])]))<<28;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+7])]))<<24;
 
 #if ARCH_LITTLE_ENDIAN
 		out[i]=temp;
@@ -595,7 +599,7 @@ static char *get_key(int index)
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
 #ifdef SIMD_COEF_32
-	unsigned int i = 0;
+	int i = 0;
 #ifdef _OPENMP
 	const unsigned int count = (*pcount + NBKEYS - 1) / NBKEYS;
 

@@ -191,7 +191,7 @@ static void reset(struct db_main *db)
 		// Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 1, self,
 		                       create_clobj, release_clobj,
-		                       sizeof(strip_password), 0);
+		                       sizeof(strip_password), 0, db);
 
 		// Auto tune execution from shared/included code.
 		autotune_run(self, 1, 0, 1000);
@@ -232,6 +232,7 @@ static void *get_salt(char *ciphertext)
 	if (!cs)
 		cs = mem_alloc_tiny(sizeof(struct custom_salt), 4);
 
+	memset(cs, 0, sizeof(struct custom_salt));
 	ctcopy += 7+1;	/* skip over "$strip$" and first '*' */
 	p = strtokm(ctcopy, "*");
 	for (i = 0; i < 16; i++)

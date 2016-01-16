@@ -340,7 +340,7 @@ static ARCH_WORD_32 *generate_des_format(uchar* binary)
 
 			for (src = 0; src < 8; src++) {
 				if (value & mask)
-					block[(chr/4) + (dst>>5)]|= 1 << (dst & 0x1F);
+					block[(chr/4) + (dst>>5)]|= 1U << (dst & 0x1F);
 				mask >>= 1;
 				dst++;
 			}
@@ -447,37 +447,34 @@ static int cmp_one(void *binary, int index)
 
 static int cmp_exact(char *source, int index)
 {
-	ARCH_WORD_32 *binary;
+	ARCH_WORD_32 *binary = get_binary(source);
+
+	if (!DES_bs_cmp_one(binary, 64, index))
+		return 0;
+
+	setup_des_key(&saved_key[index][7], 0);
+	DES_bs_crypt_plain(1);
+	if (!DES_bs_cmp_one(&binary[2], 64, 0))
+	{
+		setup_des_key(saved_key[0], 0);
+		DES_bs_crypt_plain(1);
+		return 0;
+	}
 
 	/* NULL-pad 16-byte NTLM hash to 21-bytes (postponed until now) */
 	memset(&saved_key[index][16], 0, 5);
 
-	binary = get_binary(source);
-	if (!DES_bs_cmp_one(binary, 64, index))
-	{
-		setup_des_key(saved_key[0], 0);
-		return 0;
-	}
-
-	setup_des_key(&saved_key[index][7], 0);
-	DES_bs_crypt_plain(1);
-	binary = get_binary(source);
-	if (!DES_bs_cmp_one(&binary[2], 64, 0))
-	{
-		setup_des_key(saved_key[0], 0);
-		return 0;
-	}
-
 	setup_des_key(&saved_key[index][14], 0);
 	DES_bs_crypt_plain(1);
-	binary = get_binary(source);
 	if (!DES_bs_cmp_one(&binary[4], 64, 0))
 	{
 		setup_des_key(saved_key[0], 0);
+		DES_bs_crypt_plain(1);
 		return 0;
 	}
 
 	setup_des_key(saved_key[0], 0);
+	DES_bs_crypt_plain(1);
 	return 1;
 }
 

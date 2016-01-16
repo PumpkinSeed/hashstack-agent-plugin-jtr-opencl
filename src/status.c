@@ -322,7 +322,7 @@ static void status_print_cracking(double percent)
 			strnzcpy(key2, key, sizeof(key2));
 		key1 = crk_get_key1();
 
-		if (pers_opts.report_utf8 && pers_opts.target_enc != UTF_8) {
+		if (options.report_utf8 && options.target_enc != UTF_8) {
 			char t2buf[PLAINTEXT_BUFFER_SIZE + 1];
 			char *t;
 
@@ -423,10 +423,10 @@ void status_print(void)
 {
 	double percent_value;
 #if defined(HAVE_CUDA) || defined(HAVE_OPENCL)
-	char s_gpu[32 * MAX_GPU_DEVICES] = "";
+	char s_gpu[64 * MAX_GPU_DEVICES] = "";
 
 	if (!(options.flags & FLG_STDOUT) &&
-	    cfg_get_bool(SECTION_OPTIONS, SUBSECTION_GPU, "SensorsStatus", 0)) {
+	    cfg_get_bool(SECTION_OPTIONS, SUBSECTION_GPU, "SensorsStatus", 1)) {
 		int i;
 		int n = 0;
 
@@ -440,20 +440,34 @@ void status_print(void)
 				fan = temp = util = -1;
 				dev_get_temp[dev](temp_dev_id[dev],
 				                  &temp, &fan, &util);
-				if (temp >= 0) {
+				if (temp >= 0 &&
+				    (options.verbosity > VERB_DEFAULT ||
+				    cfg_get_bool(SECTION_OPTIONS,
+				                 SUBSECTION_GPU,
+				                 "TempStatus", 1))) {
 					if (i == 0)
 						n += sprintf(s_gpu + n,
-						             " GPU:%u" DEGC,
-						             temp);
+						             " GPU:%u%sC",
+						             temp,
+						             gpu_degree_sign);
 					else
 						n += sprintf(s_gpu + n,
-						             " GPU%d:%u" DEGC,
-						             i, temp);
+						             " GPU%d:%u%sC",
+						             i, temp,
+						             gpu_degree_sign);
 				}
-				if (util > 0)
+				if (util > 0 &&
+				    (options.verbosity > VERB_DEFAULT ||
+				    cfg_get_bool(SECTION_OPTIONS,
+				                 SUBSECTION_GPU,
+				                 "UtilStatus", 0)))
 					n += sprintf(s_gpu + n,
 					             " util:%u%%", util);
-				if (fan >= 0)
+				if (fan >= 0 &&
+				    (options.verbosity > VERB_DEFAULT ||
+				    cfg_get_bool(SECTION_OPTIONS,
+				                 SUBSECTION_GPU,
+				                 "FanStatus", 0)))
 					n += sprintf(s_gpu + n,
 					             " fan:%u%%", fan);
 			}

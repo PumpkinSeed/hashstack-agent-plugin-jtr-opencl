@@ -705,6 +705,7 @@ build_os
 build_vendor
 build_cpu
 build
+HT
 LD
 AR
 AS
@@ -784,6 +785,7 @@ YASM
 AS
 AR
 LD
+HT
 MPICC
 CC
 CFLAGS
@@ -1436,6 +1438,7 @@ Some influential environment variables:
   AS          full pathname of assembler to use
   AR          full pathname of "ar" to use
   LD          full pathname of linker to use
+  HT          pre processor macro for telling us we have Hyperthreading
   MPICC       MPI C compiler command
   CC          C compiler command
   CFLAGS      C compiler flags
@@ -3440,6 +3443,7 @@ ac_config_headers="$ac_config_headers autoconfig.h"
 
 
 # Define precious variables. They get included in --help and need no AC_SUBST
+
 
 
 
@@ -8002,9 +8006,64 @@ fi
 esac
 
 if test "x$enable_native_tests" != xno; then
-  CPU_NOTFOUND=0
   { $as_echo "$as_me:${as_lineno-$LINENO}: Testing build host's native CPU features" >&5
 $as_echo "$as_me: Testing build host's native CPU features" >&6;}
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for Hyperthreading" >&5
+$as_echo_n "checking for Hyperthreading... " >&6; }
+  if test "$cross_compiling" = yes; then :
+  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error $? "cannot run test program while cross compiling
+See \`config.log' for more details" "$LINENO" 5; }
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+    #include <stdio.h>
+        #if _MSC_VER
+        #include <intrin.h>
+        #endif
+        extern void exit(int);
+        int main(){int regs[4];
+        #if _MSC_VER
+            __cpuid(regs, 1);
+        #else
+            __asm__ __volatile__(
+        #if __x86_64__
+                "pushq %%rbx\n\t"
+        #else
+                "pushl %%ebx\n\t"
+        #endif
+                "cpuid\n\t"
+                "movl %%ebx ,%[ebx]\n\t"
+        #if __x86_64__
+                "popq %%rbx\n\t"
+        #else
+                "popl %%ebx\n\t"
+        #endif
+                : "=a"(regs[0]), [ebx] "=r"(regs[1]), "=c"(regs[2]), "=d"(regs[3]) : "a"(1));
+        #endif
+            exit(!(regs[3] & (1 << 28)));}
+
+
+_ACEOF
+if ac_fn_c_try_run "$LINENO"; then :
+  HT="-DHAVE_HT"
+     { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+
+else
+  HT="-UHAVE_HT"
+     { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+
+  CPU_NOTFOUND=0
   CC="$CC_BACKUP -mmmx"
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for MMX" >&5
 $as_echo_n "checking for MMX... " >&6; }
@@ -8086,7 +8145,6 @@ fi
   if test "x$CPU_NOTFOUND" = x0; then :
 
   CC="$CC_BACKUP -mssse3"
-  CPU_NOTFOUND=0
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for SSSE3" >&5
 $as_echo_n "checking for SSSE3... " >&6; }
   if test "$cross_compiling" = yes; then :
@@ -8126,7 +8184,6 @@ fi
   if test "x$CPU_NOTFOUND" = x0; then :
 
   CC="$CC_BACKUP -msse4.1"
-  CPU_NOTFOUND=0
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for SSE4.1" >&5
 $as_echo_n "checking for SSE4.1... " >&6; }
   if test "$cross_compiling" = yes; then :
@@ -8431,7 +8488,6 @@ rm -f core conftest.err conftest.$ac_objext \
 fi
   if test "x$CPU_NOTFOUND" = x0; then :
 
-  CPU_NOTFOUND=0
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for SSSE3" >&5
 $as_echo_n "checking for SSSE3... " >&6; }
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -8462,7 +8518,6 @@ rm -f core conftest.err conftest.$ac_objext \
 fi
   if test "x$CPU_NOTFOUND" = x0; then :
 
-  CPU_NOTFOUND=0
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for SSE4.1" >&5
 $as_echo_n "checking for SSE4.1... " >&6; }
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -10014,11 +10069,11 @@ LIBS=""
 using_rexgen=no
 # Check for rexgen only if rexgen wanted
 if test "x$enable_rexgen" != xno ; then
-	ac_fn_c_check_header_mongrel "$LINENO" "librexgen/c/librexgen.h" "ac_cv_header_librexgen_c_librexgen_h" "$ac_includes_default"
-if test "x$ac_cv_header_librexgen_c_librexgen_h" = xyes; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing c_simplestring_new" >&5
-$as_echo_n "checking for library containing c_simplestring_new... " >&6; }
-if ${ac_cv_search_c_simplestring_new+:} false; then :
+  ac_fn_c_check_header_mongrel "$LINENO" "librexgen/version.h" "ac_cv_header_librexgen_version_h" "$ac_includes_default"
+if test "x$ac_cv_header_librexgen_version_h" = xyes; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing rexgen_version_int" >&5
+$as_echo_n "checking for library containing rexgen_version_int... " >&6; }
+if ${ac_cv_search_rexgen_version_int+:} false; then :
   $as_echo_n "(cached) " >&6
 else
   ac_func_search_save_LIBS=$LIBS
@@ -10031,11 +10086,11 @@ cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 #ifdef __cplusplus
 extern "C"
 #endif
-char c_simplestring_new ();
+char rexgen_version_int ();
 int
 main ()
 {
-return c_simplestring_new ();
+return rexgen_version_int ();
   ;
   return 0;
 }
@@ -10048,37 +10103,57 @@ for ac_lib in '' rexgen librexgen; do
     LIBS="-l$ac_lib  $ac_func_search_save_LIBS"
   fi
   if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_search_c_simplestring_new=$ac_res
+  ac_cv_search_rexgen_version_int=$ac_res
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext
-  if ${ac_cv_search_c_simplestring_new+:} false; then :
+  if ${ac_cv_search_rexgen_version_int+:} false; then :
   break
 fi
 done
-if ${ac_cv_search_c_simplestring_new+:} false; then :
+if ${ac_cv_search_rexgen_version_int+:} false; then :
 
 else
-  ac_cv_search_c_simplestring_new=no
+  ac_cv_search_rexgen_version_int=no
 fi
 rm conftest.$ac_ext
 LIBS=$ac_func_search_save_LIBS
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_c_simplestring_new" >&5
-$as_echo "$ac_cv_search_c_simplestring_new" >&6; }
-ac_res=$ac_cv_search_c_simplestring_new
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_rexgen_version_int" >&5
+$as_echo "$ac_cv_search_rexgen_version_int" >&6; }
+ac_res=$ac_cv_search_rexgen_version_int
 if test "$ac_res" != no; then :
   test "$ac_res" = "none required" || LIBS="$ac_res $LIBS"
+  if test "$cross_compiling" = yes; then :
+  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error $? "cannot run test program while cross compiling
+See \`config.log' for more details" "$LINENO" 5; }
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main() { return ! (rexgen_version_int() >= 0x010300); }
+_ACEOF
+if ac_fn_c_try_run "$LINENO"; then :
   using_rexgen=yes
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+
+fi
+
+
+fi
+
+
+  if test "x$using_rexgen" == "xyes" ; then
 
 $as_echo "#define HAVE_LIBREXGEN 1" >>confdefs.h
 
-fi
-
-fi
-
-
-	REXGEN_LIBS=$LIBS
+  fi
+  REXGEN_LIBS=$LIBS
 
 else
   { $as_echo "$as_me:${as_lineno-$LINENO}: rexgen check not enabled" >&5
@@ -12393,6 +12468,8 @@ $as_echo "$as_me: not updating unwritable cache $cache_file" >&6;}
 fi
 rm -f confcache
 
+CPU_BEST_FLAGS_MAIN=-DJOHN_$(echo ${CPU_STR} | tr . _)
+
 CC_CPU="${CPU_BEST_FLAGS}"
 
 CC_MAIN_CPU="${CPU_BEST_FLAGS_MAIN}"
@@ -13682,9 +13759,11 @@ fi
 M4_INCLUDES=`echo m4/*.m4`
 
 
-# Handle --prefix -> JOHN_SYSTEMWIDE_EXEC
+# Handle --prefix -> JOHN_SYSTEMWIDE
+# A prefix of /usr/local will mean execs in /usr/local/bin and the rest
+# in /usr/local/share/john
 if test $prefix != "../run" && test $prefix != "NONE" ; then :
-  CFLAGS="$CFLAGS -DJOHN_SYSTEMWIDE -DJOHN_SYSTEMWIDE_EXEC='\"$prefix\"'"
+  CFLAGS="$CFLAGS -DJOHN_SYSTEMWIDE -DJOHN_SYSTEMWIDE_EXEC='\"$prefix/bin\"' -DJOHN_SYSTEMWIDE_HOME='\"$prefix/share/john\"'"
 else
   if test $with_systemwide != no; then :
   CFLAGS="$CFLAGS -DJOHN_SYSTEMWIDE"
@@ -13711,7 +13790,7 @@ echo "configure: creating *_plug.c and OpenCL object rules"
 if test "`echo *_plug.c`" != "*_plug.c"; then
    PLUGFORMATS_OBJS=`echo *_plug.c | sed 's/\.c/.o/g'`
 
-   KERNEL_OBJS=`echo opencl/*.cl | sed 's/\bopencl\//..\/run\/kernels\//g'`
+   KERNEL_OBJS=`echo opencl/*.cl | sed 's/opencl\//..\/run\/kernels\//g'`
 
    if test "x$plug_deps" = xyes -a "x$PERL" != x ; then
       echo "configure: creating Makefile dependencies"
@@ -15112,9 +15191,8 @@ if test "`echo *_fmt_plug.c`" != "*_fmt_plug.c"; then
 fi
 # if the file was not created, then bail.
 if test -f fmt_externs.h -a ! -s fmt_externs.h; then
-  echo "The build of fmt_externs.h failed. Can not continue!"
   cp Makefile.stub Makefile
-  exit 1
+  as_fn_error $? "The build of fmt_externs.h failed. Can not continue!" "$LINENO" 5
 fi
 # if file does not exist, then create a blank one (i.e. no *_plug.c files)
 if test ! -f fmt_externs.h; then
@@ -15127,9 +15205,8 @@ if test "`echo *_fmt_plug.c`" != "*_fmt_plug.c"; then
 fi
 # if the file was not created, then bail.
 if test -f fmt_registers.h -a ! -s fmt_registers.h; then
-  echo "The build of fmt_registers.h failed. Can not continue!"
   cp Makefile.stub Makefile
-  exit 1
+  as_fn_error $? "The build of fmt_registers.h failed. Can not continue!" "$LINENO" 5
 fi
 # if file does not exist, then create a blank one (i.e. no *_plug.c files)
 if test ! -f fmt_registers.h; then

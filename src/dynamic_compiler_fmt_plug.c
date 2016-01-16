@@ -83,10 +83,14 @@ static char *Convert(char *Buf, char *ciphertext, int in_load)
 
 	cp = ciphertext;
 	if (!strncmp(ciphertext, "@dynamic=", 9)) {
-		cp = strchr(&ciphertext[1], '@');
-		if (!cp)
-			return "*";
-		++cp;
+		if (!strncmp(ciphertext, dyna_signature, dyna_sig_len))
+			cp = &ciphertext[dyna_sig_len];
+		else {
+			cp = strchr(&ciphertext[1], '@');
+			if (!cp)
+				return "*";
+			++cp;
+		}
 	}
 	if (in_load)
 		snprintf(Buf, sizeof(Conv_Buf), "$dynamic_6xxx$%s", cp);
@@ -101,12 +105,18 @@ static char *our_split(char *ciphertext, int index, struct fmt_main *self)
 	ciphertext = dynamic_compile_split(ciphertext);
 	return ciphertext;
 }
+extern char *load_regen_lost_salt_Prepare(char *split_fields1);
 static char *our_prepare(char **fields, struct fmt_main *self)
 {
 	if (options.format && !strncmp(options.format, "dynamic=", 8)) {
 		extern const char *options_format;
 		char *ct;
 		options_format = options.format;
+		if (options.regen_lost_salts && !strchr(fields[1], '$')) {
+			char *cp = load_regen_lost_salt_Prepare(fields[1]);
+			if (cp)
+				return cp;
+		}
 		ct = dynamic_compile_prepare(fields[0], fields[1]);
 		return ct;
 	}

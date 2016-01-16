@@ -147,18 +147,6 @@ static size_t get_task_max_work_group_size()
 	return autotune_get_task_max_work_group_size(FALSE, 0, crypt_kernel);
 }
 
-#define get_power_of_two(v)	\
-{				\
-	v--;			\
-	v |= v >> 1;		\
-	v |= v >> 2;		\
-	v |= v >> 4;		\
-	v |= v >> 8;		\
-	v |= v >> 16;		\
-	v |= v >> 32;		\
-	v++;			\
-}
-
 struct fmt_main fmt_opencl_NT;
 
 static void set_kernel_args_kpc()
@@ -303,9 +291,9 @@ static void init_kernel(unsigned int num_ld_hashes, char *bitmap_para)
 #endif
 	,offset_table_size, hash_table_size_128, shift64_ot_sz, shift64_ht_sz,
 	num_ld_hashes, mask_int_cand.num_int_cand, bitmap_para, mask_gpu_is_static,
-	(unsigned long long)const_cache_size, cp_id2macro(pers_opts.target_enc),
-	pers_opts.internal_cp == UTF_8 ? cp_id2macro(ASCII) :
-	cp_id2macro(pers_opts.internal_cp), PLAINTEXT_LENGTH,
+	(unsigned long long)const_cache_size, cp_id2macro(options.target_enc),
+	options.internal_cp == UTF_8 ? cp_id2macro(ASCII) :
+	cp_id2macro(options.internal_cp), PLAINTEXT_LENGTH,
 	static_gpu_locations[0]
 #if 1 < MASK_FMT_INT_PLHDR
 	, static_gpu_locations[1]
@@ -332,7 +320,7 @@ static void init(struct fmt_main *_self)
 
 	opencl_prepare_dev(gpu_id);
 	mask_int_cand_target = opencl_speed_index(gpu_id) / 300;
-	if (pers_opts.target_enc == UTF_8) {
+	if (options.target_enc == UTF_8) {
 		self->params.plaintext_length = MIN(125, UTF8_MAX_LENGTH);
 		tests[1].plaintext = "\xC3\xBC";	// German u-umlaut in UTF-8
 		tests[1].ciphertext = "$NT$8bd6e4fb88e01009818749c5443ea712";
@@ -570,53 +558,36 @@ static void reset(struct db_main *db)
 						get_max_mem_alloc_size(gpu_id) / BUFSIZE))
 		gws_limit >>= 1;
 
-	if (initialized && db) {
-		release_base_clobj();
-		release_clobj();
-
-		num_loaded_hashes = db->salts->count;
-		ocl_hc_128_prepare_table(db->salts);
-		init_kernel(num_loaded_hashes, ocl_hc_128_select_bitmap(num_loaded_hashes));
-
-		create_base_clobj();
-
+	if (initialized) {
 		// Forget the previous auto-tune
 		local_work_size = o_lws;
 		global_work_size = o_gws;
 
-		// Initialize openCL tuning (library) for this format.
-		opencl_init_auto_setup(SEED, 1, NULL, warn, 2, self,
-							   create_clobj, release_clobj,
-		                       2 * BUFSIZE, gws_limit);
-
-		// Auto tune execution from shared/included code.
-		autotune_run_extra(self, 1, gws_limit, 300, CL_TRUE);
-	}
-	else {
-
+		release_base_clobj();
+		release_clobj();
+	} else {
 		o_lws = local_work_size;
 		o_gws = global_work_size;
-
-		ocl_hc_128_prepare_table_test();
-
-		init_kernel(num_loaded_hashes, ocl_hc_128_select_bitmap(num_loaded_hashes));
-
-		create_base_clobj();
-
-		// GPU mask mode bench, do not auto tune for self test.
-		if ((options.flags & FLG_MASK_CHK) && !(options.flags & FLG_TEST_CHK))
-			opencl_get_sane_lws_gws_values();
-
-		// Initialize openCL tuning (library) for this format.
-		opencl_init_auto_setup(SEED, 1, NULL, warn, 2, self,
-							   create_clobj, release_clobj,
-		                       2 * BUFSIZE, gws_limit);
-
-		// Auto tune execution from shared/included code.
-		autotune_run_extra(self, 1, gws_limit, 300, CL_TRUE);
-
-		initialized++;
+		initialized = 1;
 	}
+
+	num_loaded_hashes = db->salts->count;
+	ocl_hc_128_prepare_table(db->salts);
+	init_kernel(num_loaded_hashes, ocl_hc_128_select_bitmap(num_loaded_hashes));
+
+	create_base_clobj();
+
+	// If real crack, do not auto tune for self test.
+	if (!(options.flags & FLG_TEST_CHK) && db->real && db->real != db)
+		opencl_get_sane_lws_gws_values();
+
+	// Initialize openCL tuning (library) for this format.
+	opencl_init_auto_setup(SEED, 1, NULL, warn, 2, self,
+	                       create_clobj, release_clobj,
+	                       2 * BUFSIZE, gws_limit, db);
+
+	// Auto tune execution from shared/included code.
+	autotune_run_extra(self, 1, gws_limit, 300, CL_TRUE);
 }
 
 struct fmt_main fmt_opencl_NT = {

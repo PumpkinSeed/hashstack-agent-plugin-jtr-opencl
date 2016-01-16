@@ -73,7 +73,6 @@ john_register_one(&fmt_dmg);
 #define NEED_OS_FLOCK
 #include "os.h"
 #endif
-#include "filevault.h"
 #include "arch.h"
 #include "jumbo.h"
 #include "params.h"
@@ -373,6 +372,8 @@ static void *get_salt(char *ciphertext)
 	int i;
 	char *p;
 	static struct custom_salt cs;
+
+	memset(&cs, 0, sizeof(cs));
 	ctcopy += 5;
 	p = strtokm(ctcopy, "*");
 	cs.headerver = atoi(p);

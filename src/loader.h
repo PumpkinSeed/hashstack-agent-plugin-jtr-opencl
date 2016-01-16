@@ -139,8 +139,10 @@ struct db_salt {
  * salts are removed during cracking */
 	int sequential_id;
 
+#ifndef BENCH_BUILD
 /* Tunable costs */
 	unsigned int cost[FMT_TUNABLE_COSTS];
+#endif
 
 /* Buffered keys, allocated for "single crack" mode only */
 /* THIS MUST BE LAST IN THE STRUCT */
@@ -189,9 +191,11 @@ struct db_options {
 /* Requested passwords per salt */
 	int min_pps, max_pps;
 
+#ifndef BENCH_BUILD
 /* Requested cost values */
 	unsigned int min_cost[FMT_TUNABLE_COSTS];
 	unsigned int max_cost[FMT_TUNABLE_COSTS];
+#endif
 
 /* if --show=left is used, john dumps the non-cracked hashes */
 	int showuncracked;
@@ -242,12 +246,20 @@ struct db_main {
 /* Number of salts, passwords and guesses */
 	int salt_count, password_count, guess_count;
 
+#ifndef BENCH_BUILD
 /* min. and max. tunable costs */
 	unsigned int min_cost[FMT_TUNABLE_COSTS];
 	unsigned int max_cost[FMT_TUNABLE_COSTS];
+#endif
 
 /* Ciphertext format */
 	struct fmt_main *format;
+
+/*
+ * Pointer to real db. NULL if there is none. If this db *is* the real db
+ * this points back to ourself (db->real == db).
+ */
+	struct db_main *real;
 };
 
 /* Non-zero while the loader is processing the pot file */
@@ -279,6 +291,18 @@ extern void ldr_load_pot_file(struct db_main *db, char *name);
  * Fixes the database after loading.
  */
 extern void ldr_fix_database(struct db_main *db);
+
+/*
+ * Create a fake database from a format's test vectors and return a pointer
+ * to it.
+ */
+extern struct db_main *ldr_init_test_db(struct fmt_main *format,
+                                        struct db_main *real);
+
+/*
+ * Destroy a fake database.
+ */
+extern void ldr_free_test_db(struct db_main *db);
 
 /*
  * Loads cracked passwords into the database.

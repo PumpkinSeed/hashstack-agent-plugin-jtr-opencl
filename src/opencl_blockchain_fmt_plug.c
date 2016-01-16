@@ -197,7 +197,7 @@ static void reset(struct db_main *db)
 		// Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 1, self,
 		                       create_clobj, release_clobj,
-		                       sizeof(blockchain_password), 0);
+		                       sizeof(blockchain_password), 0, db);
 
 		// Auto tune execution from shared/included code.
 		autotune_run(self, 1, 0, 1000);
@@ -256,6 +256,7 @@ static void *get_salt(char *ciphertext)
 	} un;
 	struct custom_salt *cs = &(un._cs);
 
+	memset(&un, 0, sizeof(un));
 	ctcopy += TAG_LENGTH;
 	p = strtokm(ctcopy, "$");
 	if (!strcmp(p, "v2")) {

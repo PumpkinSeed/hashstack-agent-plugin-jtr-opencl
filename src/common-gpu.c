@@ -37,7 +37,6 @@
 #include "memory.h"
 #include "params.h"
 #include "logger.h"
-#include "config.h"
 #include "signals.h"
 #include "memdbg.h"
 
@@ -46,7 +45,8 @@ int gpu_id;
 int gpu_device_list[MAX_GPU_DEVICES];
 hw_bus gpu_device_bus[MAX_GPU_DEVICES];
 
-static int temp_limit;
+int gpu_temp_limit;
+char gpu_degree_sign[8] = "";
 
 void *nvml_lib;
 NVMLINIT nvmlInit = NULL;
@@ -119,9 +119,6 @@ void nvidia_probe(void)
 	if (nvml_lib)
 		return;
 
-	temp_limit = cfg_get_int(SECTION_OPTIONS, SUBSECTION_GPU,
-	                         "AbortTemperature");
-
 	if (!(nvml_lib = dlopen("libnvidia-ml.so", RTLD_LAZY|RTLD_GLOBAL)))
 		return;
 
@@ -153,9 +150,6 @@ void amd_probe(void)
 
 	if (adl_lib)
 		return;
-
-	temp_limit = cfg_get_int(SECTION_OPTIONS, SUBSECTION_GPU,
-	                         "AbortTemperature");
 
 	if (!(adl_lib = dlopen("libatiadlxx.so", RTLD_LAZY|RTLD_GLOBAL)))
 		return;
@@ -256,7 +250,6 @@ void nvidia_get_temp(int nvml_id, int *temp, int *fanspeed, int *util)
 	nvmlUtilization_t s_util;
 	nvmlDevice_t dev;
 	unsigned int value;
-	char name[80];
 
 	if (nvmlDeviceGetHandleByIndex(nvml_id, &dev) != NVML_SUCCESS) {
 		*temp = *fanspeed = *util = -1;
@@ -275,9 +268,6 @@ void nvidia_get_temp(int nvml_id, int *temp, int *fanspeed, int *util)
 		*util = s_util.gpu;
 	else
 		*util = -1;
-
-	if (nvmlDeviceGetName(dev, name, sizeof(name)) != NVML_SUCCESS)
-		sprintf(name, "[error querying for name]");
 }
 
 #if __linux__ && HAVE_LIBDL
@@ -437,7 +427,7 @@ void gpu_check_temp(void)
 	static int warned;
 	int i;
 
-	if (temp_limit < 0)
+	if (gpu_temp_limit < 0)
 		return;
 
 	for (i = 0; i < MAX_GPU_DEVICES && gpu_device_list[i] != -1; i++)
@@ -449,25 +439,25 @@ void gpu_check_temp(void)
 
 		if (temp > 125 || temp < 10) {
 			if (!warned++) {
-				log_event("GPU %d probably invalid temp reading (%d" DEGC
-				          ").", dev, temp);
-				fprintf(stderr, "GPU %d probably invalid temp reading (%d"
-				        DEGC ").\n", dev, temp);
+				log_event("GPU %d probably invalid temp reading (%d%sC).",
+				          dev, temp, gpu_degree_sign);
+				fprintf(stderr,
+				        "GPU %d probably invalid temp reading (%d%sC).\n",
+				        dev, temp, gpu_degree_sign);
 			}
 			return;
 		}
 
-		if (temp >= temp_limit) {
-			char s_fan[10] = "n/a";
+		if (temp >= gpu_temp_limit) {
+			char s_fan[16] = "n/a";
 			if (fan >= 0)
 				sprintf(s_fan, "%u%%", fan);
 			if (!event_abort) {
-				log_event("GPU %d overheat (%d" DEGC
-				          ", fan %s), aborting job.",
-				          dev, temp, s_fan);
-				fprintf(stderr, "GPU %d overheat (%d" DEGC
-				        ", fan %s), aborting job.\n",
-				        dev, temp, s_fan);
+				log_event("GPU %d overheat (%d%sC, fan %s), aborting job.",
+				          dev, temp, gpu_degree_sign, s_fan);
+				fprintf(stderr,
+				        "GPU %d overheat (%d%sC, fan %s), aborting job.\n",
+				        dev, temp, gpu_degree_sign, s_fan);
 			}
 			event_abort++;
 		}
@@ -482,7 +472,7 @@ void gpu_log_temp(void)
 
 	for (i = 0; i < MAX_GPU_DEVICES && gpu_device_list[i] != -1; i++)
 	if (dev_get_temp[gpu_device_list[i]]) {
-		char s_gpu[32] = "";
+		char s_gpu[256] = "";
 		int n, fan, temp, util;
 		int dev = gpu_device_list[i];
 
@@ -490,7 +480,7 @@ void gpu_log_temp(void)
 		dev_get_temp[dev](temp_dev_id[dev], &temp, &fan, &util);
 		n = sprintf(s_gpu, "GPU %d:", dev);
 		if (temp >= 0)
-			n += sprintf(s_gpu + n, " temp: %u" DEGC, temp);
+			n += sprintf(s_gpu + n, " temp: %u%sC", temp, gpu_degree_sign);
 		if (util > 0)
 			n += sprintf(s_gpu + n, " util: %u%%", util);
 		if (fan >= 0)

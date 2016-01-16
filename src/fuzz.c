@@ -20,7 +20,7 @@
 #endif /* __CYGWIN */
 #endif /* _MSC_VER ... */
 
-#ifndef __linux__
+#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 #include <io.h> /* mingW _mkdir */
 #endif
 
@@ -28,6 +28,7 @@
 #include <sys/mman.h>
 #endif
 
+#include "misc.h"	// error()
 #include "config.h"
 #include "john.h"
 #include "params.h"
@@ -517,10 +518,10 @@ static char * get_next_fuzz_case(char *label, char *ciphertext)
 static void init_status(char *format_label)
 {
 	sprintf(status_file_path, "%s", "fuzz_status");
-#ifdef __linux__
-	if (mkdir(status_file_path, S_IRUSR | S_IWUSR | S_IXUSR)) {
-#else
+#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 	if (_mkdir(status_file_path)) { // MingW
+#else
+	if (mkdir(status_file_path, S_IRUSR | S_IWUSR | S_IXUSR)) {
 #endif
 		if (errno != EEXIST) pexit("mkdir: %s", status_file_path);
 	} else
@@ -653,7 +654,7 @@ int fuzz(struct db_main *db)
 		    format->params.benchmark_comment,
 		    format->params.algorithm_name,
 #ifndef BENCH_BUILD
-			(pers_opts.target_enc == UTF_8 &&
+			(options.target_enc == UTF_8 &&
 			 format->params.flags & FMT_UNICODE) ?
 		        " in UTF-8 mode" : "");
 #else

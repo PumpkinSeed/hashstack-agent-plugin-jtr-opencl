@@ -480,14 +480,14 @@ static int valid(char *ciphertext, struct fmt_main *pFmt)
 	if (strlen(&cp[cipherTextLen]) > SALT_SIZE)
 		return 0;
 // end NOTE.
-	if (pPriv->dynamic_FIXED_SALT_SIZE && ciphertext[pPriv->dynamic_SALT_OFFSET-1] != '$')
+	if (pPriv->dynamic_FIXED_SALT_SIZE > 0 && ciphertext[pPriv->dynamic_SALT_OFFSET-1] != '$')
 		return 0;
 	if (pPriv->dynamic_FIXED_SALT_SIZE > 0 && strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]) != pPriv->dynamic_FIXED_SALT_SIZE) {
 		// check if there is a 'salt-2' or 'username', etc  If that is the case, then this is still valid.
 		if (strncmp(&ciphertext[pPriv->dynamic_SALT_OFFSET+pPriv->dynamic_FIXED_SALT_SIZE], "$$", 2))
 			return 0;
 	}
-	else if (pPriv->dynamic_FIXED_SALT_SIZE < -1 && strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]) > -(pPriv->dynamic_FIXED_SALT_SIZE)) {
+	else if (!regen_salts_options && pPriv->dynamic_FIXED_SALT_SIZE < -1 && strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]) > -(pPriv->dynamic_FIXED_SALT_SIZE)) {
 		// check if there is a 'salt-2' or 'username', etc  If that is the case, then this is still 'valid'
 		char *cpX = mem_alloc(-(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
 		strnzcpy(cpX, &ciphertext[pPriv->dynamic_SALT_OFFSET], -(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
@@ -602,7 +602,7 @@ static inline void __nonMP_DynamicFunc__append_keys2()
 static void __possMP_DynamicFunc__crypt2_md5()
 {
 #ifdef _OPENMP
-	unsigned int i;
+	int i;
 	unsigned int inc = OMP_MD5_INC;
 //	if (dynamic_use_sse!=1)
 //		inc = OMP_INC;
@@ -795,7 +795,7 @@ static void init(struct fmt_main *pFmt)
 	fmt_Dynamic.params.benchmark_comment  = pFmt->params.benchmark_comment;
 	fmt_Dynamic.params.benchmark_length   = pFmt->params.benchmark_length;
  // we allow for 3 bytes of utf8 data to make up the number of plaintext_length unicode chars.
-	if ( (pFmt->params.flags&FMT_UNICODE) && pers_opts.target_enc == UTF_8 ) {
+	if ( (pFmt->params.flags&FMT_UNICODE) && options.target_enc == UTF_8 ) {
 		//printf ("Here pFmt->params.plaintext_length=%d pPriv->pSetup->MaxInputLen=%d\n", pFmt->params.plaintext_length, pPriv->pSetup->MaxInputLen);
 		pFmt->params.plaintext_length = MIN(125, pFmt->params.plaintext_length * 3);
 	}
@@ -1238,7 +1238,7 @@ static void set_key(char *key, int index)
 				}
 				if (!(temp & 0xff000000))
 				{
-					*keybuf_word = temp | (0x80 << 24);
+					*keybuf_word = temp | (0x80U << 24);
 					len+=3;
 					goto key_cleaning;
 				}
@@ -1698,7 +1698,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	{
 #ifdef _OPENMP
 	if ((curdat.pFmtMain->params.flags & FMT_OMP) == FMT_OMP) {
-		unsigned int j;
+		int j;
 		unsigned int inc = (m_count+m_ompt-1) / m_ompt;
 		//printf ("maxkeys=%d m_count=%d inc1=%d granularity=%d inc2=%d\n", curdat.pFmtMain->params.max_keys_per_crypt, m_count, inc, curdat.omp_granularity, ((inc + curdat.omp_granularity-1)/curdat.omp_granularity)*curdat.omp_granularity);
 		inc = ((inc + curdat.omp_granularity-1)/curdat.omp_granularity)*curdat.omp_granularity;
@@ -3143,7 +3143,7 @@ static inline void __append_string(DYNA_OMP_PARAMSm unsigned char *Str, unsigned
 				__SSE_append_string_to_input(input_buf[idx].c,idx_mod,Str,len,bf_ptr,1);
 			}
 		} else {
-			if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+			if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 				UTF16 utf16Str[27+1]; // 27 chars is 'max' that fits in SSE without overflow, so that is where we limit it at now
 				int outlen;
 
@@ -3172,7 +3172,7 @@ static inline void __append_string(DYNA_OMP_PARAMSm unsigned char *Str, unsigned
 	}
 #endif
 	if (md5_unicode_convert_get(tid)) {
-		if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+		if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 			UTF16 utf16Str[EFFECTIVE_MAX_LENGTH / 3 + 1];
 			int outlen;
 			outlen = enc_to_utf16(utf16Str, EFFECTIVE_MAX_LENGTH / 3, Str, len) * sizeof(UTF16);
@@ -3246,7 +3246,7 @@ static inline void __append2_string(DYNA_OMP_PARAMSm unsigned char *Str, unsigne
 				__SSE_append_string_to_input(input_buf2[idx].c,idx_mod,Str,len,bf_ptr,1);
 			}
 		} else {
-			if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+			if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 				UTF16 utf16Str[27+1]; // 27 chars is 'max' that fits in SSE without overflow, so that is where we limit it at now
 				int outlen;
 
@@ -3275,7 +3275,7 @@ static inline void __append2_string(DYNA_OMP_PARAMSm unsigned char *Str, unsigne
 	}
 #endif
 	if (md5_unicode_convert_get(tid)) {
-		if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+		if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 			UTF16 utf16Str[EFFECTIVE_MAX_LENGTH / 3 + 1];
 			int outlen;
 			outlen = enc_to_utf16(utf16Str, EFFECTIVE_MAX_LENGTH / 3, Str, len) * sizeof(UTF16);
@@ -3540,7 +3540,7 @@ void DynamicFunc__append_keys(DYNA_OMP_PARAMS)
 			unsigned int idx_mod = j&(SIMD_COEF_32-1);
 			unsigned int bf_ptr = total_len[idx][idx_mod];
 			if (md5_unicode_convert_get(tid)) {
-				if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+				if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 					UTF16 utf16Str[27+1]; // 27 chars is 'max' that fits in SSE without overflow, so that is where we limit it at now
 					int outlen;
 					int maxlen=27;
@@ -3567,7 +3567,7 @@ void DynamicFunc__append_keys(DYNA_OMP_PARAMS)
 	}
 #endif
 	if (md5_unicode_convert_get(tid)) {
-		if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+		if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 			for (; j < til; ++j) {
 				unsigned int z;
 				unsigned char *cp, *cpi;
@@ -3730,7 +3730,7 @@ void DynamicFunc__append_keys2(DYNA_OMP_PARAMS)
 			unsigned int idx_mod = j&(SIMD_COEF_32-1);
 			unsigned int bf_ptr = total_len2[idx][idx_mod];
 			if (md5_unicode_convert_get(tid)) {
-				if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+				if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 					UTF16 utf16Str[27+1]; // 27 chars is 'max' that fits in SSE without overflow, so that is where we limit it at now
 					int outlen;
 					int maxlen=27;
@@ -3757,7 +3757,7 @@ void DynamicFunc__append_keys2(DYNA_OMP_PARAMS)
 	}
 #endif
 	if (md5_unicode_convert_get(tid)) {
-		if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+		if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 			for (; j < til; ++j) {
 				unsigned int z;
 				unsigned char *cp, *cpi;
@@ -5425,7 +5425,7 @@ void DynamicFunc__overwrite_salt_to_input1_no_size_fix(DYNA_OMP_PARAMS)
 #ifdef SIMD_COEF_32
 	if (dynamic_use_sse==1) {
 		if (md5_unicode_convert_get(tid)) {
-			if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+			if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 				UTF16 utf16Str[27+1]; // 27 chars is 'max' that fits in SSE without overflow, so that is where we limit it at now
 				int outlen;
 				outlen = enc_to_utf16(utf16Str, 27, (unsigned char*)cursalt, saltlen) * sizeof(UTF16);
@@ -5446,7 +5446,7 @@ void DynamicFunc__overwrite_salt_to_input1_no_size_fix(DYNA_OMP_PARAMS)
 	}
 #endif
 	if (md5_unicode_convert_get(tid)) {
-		if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+		if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 			UTF16 utf16Str[EFFECTIVE_MAX_LENGTH / 3 + 1];
 			int outlen;
 			outlen = enc_to_utf16(utf16Str, EFFECTIVE_MAX_LENGTH / 3, (unsigned char*)cursalt, saltlen) * sizeof(UTF16);
@@ -5506,7 +5506,7 @@ void DynamicFunc__overwrite_salt_to_input2_no_size_fix(DYNA_OMP_PARAMS)
 #ifdef SIMD_COEF_32
 	if (dynamic_use_sse==1) {
 		if (md5_unicode_convert_get(tid)) {
-			if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+			if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 				UTF16 utf16Str[27+1]; // 27 chars is 'max' that fits in SSE without overflow, so that is where we limit it at now
 				int outlen;
 				outlen = enc_to_utf16(utf16Str, 27, (unsigned char*)cursalt, saltlen) * sizeof(UTF16);
@@ -5527,7 +5527,7 @@ void DynamicFunc__overwrite_salt_to_input2_no_size_fix(DYNA_OMP_PARAMS)
 	}
 #endif
 	if (md5_unicode_convert_get(tid)) {
-		if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1) {
+		if (options.target_enc != ASCII && options.target_enc != ISO_8859_1) {
 			UTF16 utf16Str[EFFECTIVE_MAX_LENGTH / 3 + 1];
 			int outlen;
 			outlen = enc_to_utf16(utf16Str, EFFECTIVE_MAX_LENGTH / 3, (unsigned char*)cursalt, saltlen) * sizeof(UTF16);
@@ -7130,7 +7130,7 @@ static void dyna_setupOMP(DYNAMIC_Setup *Setup, struct fmt_main *pFmt)
 #endif
 	for (i=0; Setup->pFuncs[i]; ++i) {
 		if (isBadOMPFunc(Setup->pFuncs[i]))
-			pFmt->params.flags &= (~FMT_OMP);
+			pFmt->params.flags &= (~(FMT_OMP|FMT_OMP_BAD));
 	}
 	if ((pFmt->params.flags&FMT_OMP)==FMT_OMP && (curdat.pSetup->startFlags&MGF_POOR_OMP)==MGF_POOR_OMP)
 		pFmt->params.flags |= FMT_OMP_BAD;
@@ -7643,12 +7643,12 @@ int dynamic_SETUP(DYNAMIC_Setup *Setup, struct fmt_main *pFmt)
 				i = 0;
 			}
 			if (Setup->pPreloads[i].ciphertext[0] == 'A' && Setup->pPreloads[i].ciphertext[1] == '=') {
-				if (pers_opts.target_enc != ASCII && pers_opts.target_enc != ISO_8859_1)
+				if (options.target_enc != ASCII && options.target_enc != ISO_8859_1)
 					continue;
 				pfx[cnt].ciphertext = str_alloc_copy(&Setup->pPreloads[i].ciphertext[2]);
 			}
 			else if (Setup->pPreloads[i].ciphertext[0] == 'U' && Setup->pPreloads[i].ciphertext[1] == '=') {
-				if (pers_opts.target_enc != UTF_8)
+				if (options.target_enc != UTF_8)
 					continue;
 				pfx[cnt].ciphertext = str_alloc_copy(&Setup->pPreloads[i].ciphertext[2]);
 			}

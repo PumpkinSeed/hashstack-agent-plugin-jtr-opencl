@@ -18,23 +18,12 @@ static cl_uint *zero_buffer = NULL;
 static cl_mem buffer_offset_table, buffer_hash_table, buffer_return_hashes, buffer_hash_ids, buffer_bitmap_dupe, buffer_bitmaps;
 static struct fmt_main *self;
 
-#define get_power_of_two(v)	\
-{				\
-	v--;			\
-	v |= v >> 1;		\
-	v |= v >> 2;		\
-	v |= v >> 4;		\
-	v |= v >> 8;		\
-	v |= v >> 16;		\
-	v |= v >> 32;		\
-	v++;			\
-}
-
 #include "memdbg.h"
 
 void ocl_hc_128_init(struct fmt_main *_self)
 {
 	self = _self;
+	hash_table_128 = NULL;
 }
 
 void ocl_hc_128_prepare_table(struct db_salt *salt) {
@@ -43,10 +32,14 @@ void ocl_hc_128_prepare_table(struct db_salt *salt) {
 
 	num_loaded_hashes = (salt->count);
 
-	MEM_FREE(loaded_hashes);
-	MEM_FREE(hash_ids);
-	MEM_FREE(offset_table);
-	MEM_FREE(hash_table_128);
+	if (loaded_hashes)
+		MEM_FREE(loaded_hashes);
+	if (hash_ids)
+		MEM_FREE(hash_ids);
+	if (offset_table)
+		MEM_FREE(offset_table);
+	if (hash_table_128)
+		MEM_FREE(hash_table_128);
 
 	loaded_hashes = (cl_uint*) mem_alloc(4 * num_loaded_hashes * sizeof(cl_uint));
 	hash_ids = (cl_uint*) mem_alloc((3 * num_loaded_hashes + 1) * sizeof(cl_uint));
@@ -98,10 +91,14 @@ void ocl_hc_128_prepare_table_test() {
 	while (self->params.tests[num_loaded_hashes].ciphertext != NULL)
 			num_loaded_hashes++;
 
-	MEM_FREE(loaded_hashes);
-	MEM_FREE(hash_ids);
-	MEM_FREE(offset_table);
-	MEM_FREE(hash_table_128);
+	if (loaded_hashes)
+		MEM_FREE(loaded_hashes);
+	if (hash_ids)
+		MEM_FREE(hash_ids);
+	if (offset_table)
+		MEM_FREE(offset_table);
+	if (hash_table_128)
+		MEM_FREE(hash_table_128);
 
 	loaded_hashes = (cl_uint*) mem_alloc(4 * num_loaded_hashes * sizeof(cl_uint));
 	hash_ids = (cl_uint*) mem_calloc((3 * num_loaded_hashes + 1), sizeof(cl_uint));
@@ -324,6 +321,13 @@ char* ocl_hc_128_select_bitmap(unsigned int num_ld_hashes)
 
 	else
 		prepare_bitmap_8(bitmap_size_bits, &bitmaps);
+
+	/*
+	 * Much better speed seen on Macbook Pro with GT 650M. Not sure why -
+	 * or what we should actually test for.
+	 */
+	if (platform_apple(platform_id) && gpu_nvidia(device_info[gpu_id]))
+		use_local = 0;
 
 	sprintf(kernel_params,
 		"-D SELECT_CMP_STEPS=%u"

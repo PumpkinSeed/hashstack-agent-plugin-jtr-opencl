@@ -55,6 +55,115 @@
 
 #ifndef BENCH_BUILD
 #include "options.h"
+#else
+/*
+ * This code was copied from loader.c.  It has been stripped to bare bones
+ * to get what is 'needed' for the bench executable to run.
+ */
+
+static void _ldr_init_database(struct db_main *db) {
+	db->loaded = 0;
+	db->real = db;
+	db->pw_size = sizeof(struct db_password);
+	db->salt_size = sizeof(struct db_salt);
+	db->pw_size -= sizeof(struct list_main *);
+	db->pw_size -= sizeof(char *) * 2;
+	db->salt_size -= sizeof(struct db_keys *);
+	db->options = mem_calloc(sizeof(struct db_options), 1);
+	db->salts = NULL;
+	db->password_hash = NULL;
+	db->password_hash_func = NULL;
+	db->salt_hash = mem_alloc(
+		SALT_HASH_SIZE * sizeof(struct db_salt *));
+	memset(db->salt_hash, 0,
+		SALT_HASH_SIZE * sizeof(struct db_salt *));
+	db->cracked_hash = NULL;
+	db->salt_count = db->password_count = db->guess_count = 0;
+	db->format = NULL;
+}
+
+struct db_main *ldr_init_test_db(struct fmt_main *format, struct db_main *real)
+{
+	struct fmt_main *real_list = fmt_list;
+	struct fmt_main fake_list;
+	struct db_main *testdb;
+	struct fmt_tests *current;
+
+	if (!(current = format->params.tests))
+		return NULL;
+
+	memcpy(&fake_list, format, sizeof(struct fmt_main));
+	fake_list.next = NULL;
+	fmt_list = &fake_list;
+	testdb = mem_alloc(sizeof(struct db_main));
+	fmt_init(format);
+
+	//ldr_init_database(testdb, &options.loader);
+	_ldr_init_database(testdb);
+	testdb->options->field_sep_char = ':';
+	testdb->real = real;
+	testdb->format = format;
+
+	//ldr_init_password_hash(testdb);
+	testdb->password_hash_func = fmt_default_binary_hash;
+	testdb->password_hash = mem_alloc(password_hash_sizes[0] * sizeof(struct db_password *));
+	memset(testdb->password_hash, 0, password_hash_sizes[0] * sizeof(struct db_password *));
+	while (current->ciphertext) {
+		char line[LINE_BUFFER_SIZE];
+		int i, pos = 0;
+		char *piece;
+		void *salt;
+		struct db_salt *current_salt, *last_salt;
+		int salt_hash;
+		if (!current->fields[0])
+			current->fields[0] = "?";
+		if (!current->fields[1])
+			current->fields[1] = current->ciphertext;
+		for (i = 0; i < 10; i++)
+			if (current->fields[i])
+				pos += sprintf(&line[pos], "%s%c",
+				               current->fields[i],
+				               testdb->options->field_sep_char);
+
+		//ldr_load_pw_line(testdb, line);
+		piece = format->methods.split(line, 0, format);
+		salt = format->methods.salt(piece);
+		salt_hash = format->methods.salt_hash(salt);
+		if ((current_salt = testdb->salt_hash[salt_hash])) {
+			do {
+				if (!dyna_salt_cmp(current_salt->salt, salt, format->params.salt_size))
+					break;
+			}  while ((current_salt = current_salt->next));
+		}
+		if (!current_salt) {
+			last_salt = testdb->salt_hash[salt_hash];
+			current_salt = testdb->salt_hash[salt_hash] =
+				mem_alloc_tiny(testdb->salt_size, MEM_ALIGN_WORD);
+			current_salt->next = last_salt;
+			current_salt->salt = mem_alloc_copy(salt,
+				format->params.salt_size,
+				format->params.salt_align);
+			current_salt->index = fmt_dummy_hash;
+			current_salt->bitmap = NULL;
+			current_salt->list = NULL;
+			current_salt->hash = &current_salt->list;
+			current_salt->hash_size = -1;
+			current_salt->count = 0;
+			testdb->salt_count++;
+		}
+		current_salt->count++;
+		testdb->password_count++;
+		current++;
+	}
+	//ldr_fix_database(testdb);
+	fmt_list = real_list;
+	return testdb;
+}
+
+// lol, who cares about memory leaks here.  This is just the benchmark builder
+void ldr_free_test_db(struct db_main *db)
+{
+}
 #endif
 
 #ifdef HAVE_MPI
@@ -117,10 +226,12 @@ static void bench_set_keys(struct fmt_main *format,
 {
 	char *plaintext;
 	int index, length;
-	int len;
+#ifndef BENCH_BUILD
+	int len = format->params.plaintext_length;
 
-	if ((len = format->params.plaintext_length - mask_add_len) < 0)
+	if ((len -= mask_add_len) < 0 || !(options.flags & FLG_MASK_STACKED))
 		len = 0;
+#endif
 
 	format->methods.clear_keys();
 
@@ -141,11 +252,13 @@ static void bench_set_keys(struct fmt_main *format,
 				break;
 		} while (1);
 
+#ifndef BENCH_BUILD
 		if (options.flags & FLG_MASK_CHK) {
 			plaintext[len] = 0;
 			if (do_mask_crack(len ? plaintext : NULL))
 				return;
 		} else
+#endif
 			format->methods.set_key(plaintext, index);
 	}
 }
@@ -171,7 +284,7 @@ static unsigned int get_cost(struct fmt_main *format, int index, int cost_idx)
 #endif
 
 char *benchmark_format(struct fmt_main *format, int salts,
-	struct bench_results *results)
+	struct bench_results *results, struct db_main *test_db)
 {
 	static void *binary = NULL;
 	static int binary_size = 0;
@@ -248,8 +361,8 @@ char *benchmark_format(struct fmt_main *format, int salts,
 #endif
 	if (!(current = format->params.tests) || !current->ciphertext)
 		return "FAILED (no data)";
-	if ((where = fmt_self_test(format, NULL))) {
-		sprintf(s_error, "FAILED (%s)\n", where);
+	if ((where = fmt_self_test(format, test_db))) {
+		snprintf(s_error, sizeof(s_error), "FAILED (%s)\n", where);
 		return s_error;
 	}
 	if (!current->ciphertext)
@@ -408,16 +521,23 @@ char *benchmark_format(struct fmt_main *format, int salts,
 		}
 
 		if (salts > 1) format->methods.set_salt(two_salts[index & 1]);
+#ifndef BENCH_BUILD
 		format->methods.cmp_all(binary,
-		    format->methods.crypt_all(&count, NULL));
+		    format->methods.crypt_all(&count, test_db->salts));
+#else
+		format->methods.cmp_all(binary,
+		    format->methods.crypt_all(&count, 0));
+#endif
 
 		add32to64(&crypts, count);
 #if !OS_TIMER
 		sig_timer_emu_tick();
 #endif
 		salts_done++;
-	} while (((wait && salts_done < salts) ||
-	          bench_running) && !event_abort);
+	} while (benchmark_time &&
+		 (((wait && salts_done < salts) ||
+	          bench_running) && !event_abort));
+	//fprintf (stderr, "  salts_done=%d  ", salts_done);
 
 #if defined (__MINGW32__) || defined (_MSC_VER)
 	end_real = clock();
@@ -525,7 +645,7 @@ int benchmark_all(void)
 #endif
 	unsigned int total, failed;
 	MEMDBG_HANDLE memHand;
-
+	struct db_main *test_db;
 #ifdef _OPENMP
 	int ompt;
 	int ompt_start = omp_get_max_threads();
@@ -566,8 +686,8 @@ AGAIN:
 			continue;
 
 /* Just test the encoding-aware formats if --encoding was used explicitly */
-		if (!pers_opts.default_enc && pers_opts.target_enc != ASCII &&
-		    pers_opts.target_enc != ISO_8859_1 &&
+		if (!options.default_enc && options.target_enc != ASCII &&
+		    options.target_enc != ISO_8859_1 &&
 		    !(format->params.flags & FMT_UTF8)) {
 			if (options.format == NULL ||
 			    strcasecmp(format->params.label, options.format))
@@ -580,7 +700,6 @@ AGAIN:
 				}
 			}
 		}
-#endif
 
 		/* FIXME: Kludge for thin dynamics, and OpenCL formats */
 		/* c3_fmt also added, since it is a somewhat dynamic   */
@@ -597,6 +716,7 @@ AGAIN:
 			fakedb.format = format;
 			mask_init(&fakedb, options.mask);
 		}
+#endif
 
 #ifdef _OPENMP
 		// MPIOMPmutex may have capped the number of threads
@@ -614,7 +734,7 @@ AGAIN:
 		    format->params.benchmark_comment,
 		    format->params.algorithm_name,
 #ifndef BENCH_BUILD
-			(pers_opts.target_enc == UTF_8 &&
+			(options.target_enc == UTF_8 &&
 			 format->params.flags & FMT_UNICODE) ?
 		        " in UTF-8 mode" : "");
 #else
@@ -675,16 +795,22 @@ AGAIN:
 
 		total++;
 
+		/* (Ab)used to mute some messages from source() */
+		bench_running = 1;
+		test_db = ldr_init_test_db(format, NULL);
+		bench_running = 0;
+
 		if ((result = benchmark_format(format,
 		    format->params.salt_size ? BENCHMARK_MANY : 1,
-		    &results_m))) {
+		    &results_m, test_db))) {
 			puts(result);
 			failed++;
 			goto next;
 		}
 
 		if (msg_1)
-		if ((result = benchmark_format(format, 1, &results_1))) {
+		if ((result = benchmark_format(format, 1, &results_1,
+		    test_db))) {
 			puts(result);
 			failed++;
 			goto next;
@@ -728,7 +854,7 @@ AGAIN:
 
 #ifndef BENCH_BUILD
 		if (john_main_process && benchmark_time &&
-		    *cost_msg && options.verbosity >= 3)
+		    *cost_msg && options.verbosity >= VERB_DEFAULT)
 			puts(cost_msg);
 #endif
 #ifdef HAVE_MPI
@@ -788,10 +914,12 @@ AGAIN:
 
 next:
 		fflush(stdout);
+		ldr_free_test_db(test_db);
 		fmt_done(format);
+#ifndef BENCH_BUILD
 		if (options.flags & FLG_MASK_CHK)
 			mask_done();
-
+#endif
 		MEMDBG_checkSnapshot_possible_exit_on_error(memHand, 0);
 
 #ifndef BENCH_BUILD

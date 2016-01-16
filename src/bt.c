@@ -15,6 +15,7 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include "misc.h" // error()
 #include "bt_twister.h"
 #include "bt_hash_types.h"
 
@@ -623,7 +624,7 @@ unsigned int create_perfect_hash_table(int htype, void *loaded_hashes_ptr,
 	if (sigaction(SIGALRM, &new_action, NULL) < 0)
 		bt_error("Error setting new signal handler.");
 
-	if (setitimer(ITIMER_REAL, NULL, &old_it) < 0)
+	if (getitimer(ITIMER_REAL, &old_it) < 0)
 		bt_error("Error retriving timer info.");
 
 	inc_ht = 0.005;

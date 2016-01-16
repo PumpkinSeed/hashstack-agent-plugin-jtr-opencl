@@ -198,7 +198,7 @@ static void reset(struct db_main *db)
 		// Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 1, self,
 		                       create_clobj, release_clobj,
-		                       sizeof(sha512_key), 0);
+		                       sizeof(sha512_key), 0, db);
 
 		// Auto tune execution from shared/included code.
 		autotune_run(self, 1, 0, 500);
@@ -217,7 +217,7 @@ static void done(void)
 	}
 }
 
-static void copy_hash_back()
+static inline void copy_hash_back()
 {
     if (!hash_copy_back) {
         HANDLE_CLERROR(clEnqueueReadBuffer(queue[gpu_id], mem_out, CL_TRUE, 0,outsize, ghash, 0, NULL, NULL), "Copy data back");

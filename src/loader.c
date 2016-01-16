@@ -58,6 +58,11 @@ extern struct fmt_main fmt_crypt;
 int ldr_in_pot = 0;
 
 /*
+ * If this is set, we are populating the test db
+ */
+static int ldr_loading_testdb = 0;
+
+/*
  * Flags for read_file().
  */
 #define RF_ALLOW_MISSING		1
@@ -93,7 +98,7 @@ static void read_file(struct db_main *db, char *name, int flags,
 	char line_buf[LINE_BUFFER_SIZE], *line;
 	int warn_enc;
 
-	warn_enc = john_main_process && (pers_opts.target_enc != ASCII) &&
+	warn_enc = john_main_process && (options.target_enc != ASCII) &&
 		cfg_get_bool(SECTION_OPTIONS, NULL, "WarnEncoding", 0);
 
 	if (flags & RF_ALLOW_DIR) {
@@ -123,15 +128,15 @@ static void read_file(struct db_main *db, char *name, int flags,
 				u8check = line;
 
 			if (((flags & RF_ALLOW_MISSING) &&
-			     pers_opts.store_utf8) ||
+			     options.store_utf8) ||
 			    ((flags & RF_ALLOW_DIR) &&
-			     pers_opts.input_enc == UTF_8)) {
+			     options.input_enc == UTF_8)) {
 				if (!valid_utf8((UTF8*)u8check)) {
 					warn_enc = 0;
 					fprintf(stderr, "Warning: invalid UTF-8"
 					        " seen reading %s\n", name);
 				}
-			} else if (pers_opts.input_enc != UTF_8 &&
+			} else if (options.input_enc != UTF_8 &&
 			           (line != line_buf ||
 			            valid_utf8((UTF8*)u8check) > 1)) {
 				warn_enc = 0;
@@ -142,7 +147,7 @@ static void read_file(struct db_main *db, char *name, int flags,
 		process_line(db, line);
 		check_abort(0);
 	}
-	if (name == pers_opts.activepot)
+	if (name == options.activepot)
 		crk_pot_pos = jtr_ftell64(file);
 
 	if (ferror(file)) pexit("fgets");
@@ -154,6 +159,7 @@ void ldr_init_database(struct db_main *db, struct db_options *db_options)
 {
 	db->loaded = 0;
 
+	db->real = db;
 	db->pw_size = sizeof(struct db_password);
 	db->salt_size = sizeof(struct db_salt);
 	if (!(db_options->flags & DB_WORDS)) {
@@ -289,24 +295,24 @@ static MAYBE_INLINE int ldr_check_shells(struct list_main *list, char *shell)
 
 static void ldr_set_encoding(struct fmt_main *format)
 {
-	if ((!pers_opts.target_enc || pers_opts.default_target_enc) &&
-	    !pers_opts.internal_cp) {
+	if ((!options.target_enc || options.default_target_enc) &&
+	    !options.internal_cp) {
 		if (!strcasecmp(format->params.label, "LM") ||
 		    !strcasecmp(format->params.label, "lm-opencl") ||
 		    !strcasecmp(format->params.label, "netlm") ||
 		    !strcasecmp(format->params.label, "nethalflm")) {
-			pers_opts.target_enc =
+			options.target_enc =
 				cp_name2id(cfg_get_param(SECTION_OPTIONS,
 				                         NULL,
 				                         "DefaultMSCodepage"));
-			if (pers_opts.target_enc)
-				pers_opts.default_target_enc = 1;
+			if (options.target_enc)
+				options.default_target_enc = 1;
 			else
-				pers_opts.target_enc = pers_opts.input_enc;
-		} else if (pers_opts.internal_cp &&
+				options.target_enc = options.input_enc;
+		} else if (options.internal_cp &&
 		           (format->params.flags & FMT_UNICODE) &&
 		           (format->params.flags & FMT_UTF8)) {
-			pers_opts.target_enc = pers_opts.internal_cp;
+			options.target_enc = options.internal_cp;
 		}
 	}
 
@@ -323,22 +329,22 @@ static void ldr_set_encoding(struct fmt_main *format)
 	/* john.conf alternative for --internal-codepage */
 	if (options.flags &
 	    (FLG_RULES | FLG_SINGLE_CHK | FLG_BATCH_CHK | FLG_MASK_CHK))
-	if ((!pers_opts.target_enc || pers_opts.target_enc == UTF_8) &&
-	    !pers_opts.internal_cp) {
-		if (!(pers_opts.internal_cp =
+	if ((!options.target_enc || options.target_enc == UTF_8) &&
+	    !options.internal_cp) {
+		if (!(options.internal_cp =
 			cp_name2id(cfg_get_param(SECTION_OPTIONS, NULL,
 			                         "DefaultInternalCodepage"))))
-			pers_opts.internal_cp =
+			options.internal_cp =
 			    cp_name2id(cfg_get_param(SECTION_OPTIONS, NULL,
 			                         "DefaultInternalEncoding"));
 	}
 
 	/* Performance opportunity - avoid unneccessary conversions */
-	if (pers_opts.internal_cp && pers_opts.internal_cp != UTF_8 &&
-	    (!pers_opts.target_enc || pers_opts.target_enc == UTF_8)) {
+	if (options.internal_cp && options.internal_cp != UTF_8 &&
+	    (!options.target_enc || options.target_enc == UTF_8)) {
 		if ((format->params.flags & FMT_UNICODE) &&
 		    (format->params.flags & FMT_UTF8))
-			pers_opts.target_enc = pers_opts.internal_cp;
+			options.target_enc = options.internal_cp;
 	}
 
 	initUnicode(UNICODE_UNICODE);
@@ -744,7 +750,7 @@ find_format:
 
 static char* ldr_conv(char *word)
 {
-	if (pers_opts.input_enc == UTF_8 && pers_opts.target_enc != UTF_8) {
+	if (options.input_enc == UTF_8 && options.target_enc != UTF_8) {
 		static char u8[PLAINTEXT_BUFFER_SIZE + 1];
 
 		word = utf8_to_cp_r(word, u8, PLAINTEXT_BUFFER_SIZE);
@@ -1053,6 +1059,78 @@ static void ldr_load_pot_line(struct db_main *db, char *line)
 		db->options->flags |= DB_NEED_REMOVAL;
 }
 
+struct db_main *ldr_init_test_db(struct fmt_main *format, struct db_main *real)
+{
+	struct fmt_main *real_list = fmt_list;
+	struct fmt_main fake_list;
+	struct db_main *testdb;
+	struct fmt_tests *current;
+
+	if (!(current = format->params.tests))
+		return NULL;
+
+	memcpy(&fake_list, format, sizeof(struct fmt_main));
+	fake_list.next = NULL;
+	fmt_list = &fake_list;
+
+	testdb = mem_alloc(sizeof(struct db_main));
+
+	fmt_init(format);
+	ldr_init_database(testdb, &options.loader);
+	testdb->options->field_sep_char = ':';
+	testdb->real = real;
+	testdb->format = format;
+	ldr_init_password_hash(testdb);
+
+	while (current->ciphertext) {
+		char line[LINE_BUFFER_SIZE];
+		int i, pos = 0;
+
+		if (!current->fields[0])
+			current->fields[0] = "?";
+		if (!current->fields[1])
+			current->fields[1] = current->ciphertext;
+		for (i = 0; i < 10; i++)
+			if (current->fields[i])
+				pos += sprintf(&line[pos], "%s%c",
+				               current->fields[i],
+				               testdb->options->field_sep_char);
+
+		ldr_load_pw_line(testdb, line);
+		current++;
+	}
+
+	ldr_loading_testdb = 1;
+	ldr_fix_database(testdb);
+	ldr_loading_testdb = 0;
+
+	if (options.verbosity == VERB_MAX)
+		fprintf(stderr,
+		        "Loaded %d hashes with %d different salts to test db from test vectors\n",
+		        testdb->password_count, testdb->salt_count);
+
+	fmt_list = real_list;
+	return testdb;
+}
+
+void ldr_free_test_db(struct db_main *db)
+{
+	if (db) {
+		if (db->format &&
+		    (db->format->params.flags & FMT_DYNA_SALT) == FMT_DYNA_SALT)
+		{
+			struct db_salt *psalt = db->salts;
+			while (psalt) {
+				dyna_salt_remove(psalt->salt);
+				psalt = psalt->next;
+			}
+		}
+		MEM_FREE(db->salt_hash);
+		MEM_FREE(db->cracked_hash);
+		MEM_FREE(db);
+	}
+}
+
 void ldr_load_pot_file(struct db_main *db, char *name)
 {
 	if (db->format && !(db->format->params.flags & FMT_NOT_EXACT)) {
@@ -1282,7 +1360,7 @@ static void ldr_show_left(struct db_main *db, struct db_password *pw)
 		uid_sep[0] = db->options->field_sep_char;
 		uid_out = pw->uid;
 	}
-	if (pers_opts.target_enc != UTF_8 && pers_opts.report_utf8)
+	if (options.target_enc != UTF_8 && options.report_utf8)
 	{
 		char utf8login[PLAINTEXT_BUFFER_SIZE + 1];
 
@@ -1558,12 +1636,13 @@ void ldr_fix_database(struct db_main *db)
 	    mem_saving_level >= 2) /* Otherwise kept for faster pot sync */
 		MEM_FREE(db->salt_hash);
 
-	ldr_filter_salts(db);
-	ldr_filter_costs(db);
-	ldr_remove_marked(db);
-	ldr_cost_ranges(db);
+	if (!ldr_loading_testdb) {
+		ldr_filter_salts(db);
+		ldr_filter_costs(db);
+		ldr_remove_marked(db);
+		ldr_cost_ranges(db);
+	}
 	ldr_sort_salts(db);
-
 	ldr_init_hash(db);
 
 	ldr_init_sqid(db);
@@ -1576,6 +1655,7 @@ void ldr_fix_database(struct db_main *db)
 			fprintf(stderr, "%s%d password hash%s cracked,"
 			        " %d left\n", total ? "\n" : "", total,
 			        total != 1 ? "es" : "", db->password_count);
+		MEMDBG_PROGRAM_EXIT_CHECKS(stderr);
 		exit(0);
 	}
 }
@@ -1644,12 +1724,15 @@ static void ldr_show_pot_line(struct db_main *db, char *line)
 		if (!strncmp(ciphertext, "$dynamic_26$", 12))
 			memset(ciphertext + 12, '0', 5);
 		else if (!strncmp(ciphertext, "{SHA}", 5)) {
-			char out[41+3];
+			char out[40+1];
+			static char tmp[40+5+1]; // larger than needed, but we know its big enough.
 			base64_convert(ciphertext + 5, e_b64_mime,
-			    strlen(ciphertext) - 5, out, e_b64_hex, 41, 0);
+			    strlen(ciphertext) - 5, out, e_b64_hex, sizeof(out), 0);
 			memcpy(out, "00000", 5);
+			ciphertext = tmp;
+			strcpy(tmp, "{SHA}");
 			base64_convert(out, e_b64_hex, 40, ciphertext + 5,
-			    e_b64_mime, strlen(out), flg_Base64_MIME_TRAIL_EQ);
+			    e_b64_mime, sizeof(tmp)-5, flg_Base64_MIME_TRAIL_EQ);
 		}
 	}
 #ifndef DYNAMIC_DISABLED
@@ -1756,14 +1839,14 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 			if (setting < 0)
 				setting = cfg_get_bool(SECTION_OPTIONS, NULL,
 				    "UnicodeStoreUTF8", 0);
-			pers_opts.store_utf8 = setting;
+			options.store_utf8 = setting;
 		} else {
 			static int setting = -1;
 			if (setting < 0)
-				setting = pers_opts.target_enc != ASCII &&
+				setting = options.target_enc != ASCII &&
 				    cfg_get_bool(SECTION_OPTIONS, NULL,
 				    "CPstoreUTF8", 0);
-			pers_opts.store_utf8 = setting;
+			options.store_utf8 = setting;
 		}
 	} else {
 		split = fmt_default_split;
@@ -1771,8 +1854,8 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 		unify = 0;
 	}
 
-	if (pers_opts.target_enc != UTF_8 &&
-	    !pers_opts.store_utf8 && pers_opts.report_utf8) {
+	if (options.target_enc != UTF_8 &&
+	    !options.store_utf8 && options.report_utf8) {
 		login = cp_to_utf8_r(login, utf8login, LINE_BUFFER_SIZE);
 		cp_to_utf8_r(source, utf8source, LINE_BUFFER_SIZE);
 		strnzcpy(source, utf8source, sizeof(source));
@@ -1817,7 +1900,7 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 				if (format)
 					chars = format->params.plaintext_length;
 				if (index < count - 1 && current &&
-				    (pers_opts.store_utf8 ?
+				    (options.store_utf8 ?
 				     (int)strlen8((UTF8*)current->plaintext) :
 				     (int)strlen(current->plaintext)) != chars)
 					current = NULL;

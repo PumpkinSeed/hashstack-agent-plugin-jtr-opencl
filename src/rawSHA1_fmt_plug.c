@@ -173,7 +173,7 @@ static void set_key(char *key, int index)
 		}
 		if (!(temp & 0xff000000))
 		{
-			*keybuf_word = JOHNSWAP(temp | (0x80 << 24));
+			*keybuf_word = JOHNSWAP(temp | (0x80U << 24));
 			len+=3;
 			goto key_cleaning;
 		}
@@ -218,11 +218,11 @@ static char *get_key(int index) {
 
 static void *get_binary(char *ciphertext)
 {
-	static ARCH_WORD_32 full[DIGEST_SIZE / 4 + 1];
+	static ARCH_WORD_32 full[DIGEST_SIZE / 4];
 	unsigned char *realcipher = (unsigned char*)full;
 
 	ciphertext += TAG_LENGTH;
-	base64_convert(ciphertext, e_b64_mime, 28, realcipher, e_b64_raw, DIGEST_SIZE, flg_Base64_MIME_TRAIL_EQ);
+	base64_convert(ciphertext, e_b64_mime, 28, realcipher, e_b64_raw, sizeof(full), flg_Base64_MIME_TRAIL_EQ);
 
 #ifdef SIMD_COEF_32
 	alter_endianity(realcipher, DIGEST_SIZE);
@@ -249,6 +249,10 @@ static char *source(char *source, void *binary)
 #ifdef REVERSE_STEPS
 	sha1_unreverse(hash);
 #endif
+	alter_endianity(hash, DIGEST_SIZE);
+#endif
+
+#if ARCH_LITTLE_ENDIAN==0
 	alter_endianity(hash, DIGEST_SIZE);
 #endif
 

@@ -27,6 +27,7 @@ john_register_one(&FMT_STRUCT);
 #include "path.h"
 #include "common.h"
 #include "formats.h"
+#include "base64_convert.h"
 #include "config.h"
 #include "options.h"
 #include "mask_ext.h"
@@ -62,18 +63,6 @@ static struct fmt_main *self;
 #define MIN_KEYS_PER_CRYPT      1
 #define MAX_KEYS_PER_CRYPT      1
 
-#define get_power_of_two(v)	\
-{				\
-	v--;			\
-	v |= v >> 1;		\
-	v |= v >> 2;		\
-	v |= v >> 4;		\
-	v |= v >> 8;		\
-	v |= v >> 16;		\
-	v |= v >> 32;		\
-	v++;			\
-}
-
 #include "memdbg.h"
 
 static struct fmt_tests tests[] = {
@@ -89,6 +78,7 @@ static struct fmt_tests tests[] = {
 	{FORMAT_TAG "57edf4a22be3c955ac49da2e2107b67a","12345678901234567890123456789012345678901234567890123456789012345678901234567890"},
 #endif
 #endif
+	{"{MD5}CY9rzUYh03PK3k6DJie09g==", "test"},
 	{NULL}
 };
 
@@ -258,6 +248,24 @@ static void init(struct fmt_main *_self)
 	mask_int_cand_target = opencl_speed_index(gpu_id) / 300;
 }
 
+/* Convert {MD5}CY9rzUYh03PK3k6DJie09g== to 098f6bcd4621d373cade4e832627b4f6 */
+static char *prepare(char *fields[10], struct fmt_main *self)
+{
+	static char out[CIPHERTEXT_LENGTH + 1];
+
+	if (!strncmp(fields[1], "{MD5}", 5) && strlen(fields[1]) == 29) {
+		int res;
+
+		res = base64_convert(&fields[1][5], e_b64_mime, 24,
+		                     out, e_b64_hex, sizeof(out),
+		                     flg_Base64_HEX_LOCASE);
+		if (res >= 0)
+			return out;
+	}
+
+	return fields[1];
+}
+
 static int valid(char *ciphertext, struct fmt_main *self)
 {
 	char *p, *q;
@@ -278,12 +286,17 @@ static int valid(char *ciphertext, struct fmt_main *self)
 static char *split(char *ciphertext, int index, struct fmt_main *self)
 {
 	static char out[TAG_LENGTH + CIPHERTEXT_LENGTH + 1];
+	int len;
 
 	if (!strncmp(ciphertext, FORMAT_TAG, TAG_LENGTH))
 		return ciphertext;
 
+	memset(out, 0, sizeof(out));
 	memcpy(out, FORMAT_TAG, TAG_LENGTH);
-	memcpy(out + TAG_LENGTH, ciphertext, CIPHERTEXT_LENGTH + 1);
+	len = strlen(ciphertext)+1;
+	if (len > CIPHERTEXT_LENGTH + 1)
+		len = CIPHERTEXT_LENGTH + 1;
+	memcpy(out + TAG_LENGTH, ciphertext, len);
 	return out;
 }
 
@@ -575,7 +588,7 @@ static void auto_tune(struct db_main *db, long double kernel_run_ms)
 	assert(global_work_size <= gws_limit);
 
 	self->params.max_keys_per_crypt = global_work_size;
-	if (options.verbosity > 3)
+	if (options.verbosity > VERB_DEFAULT)
 	fprintf(stdout, "%s GWS: "Zu", LWS: "Zu"\n", db ? "Cracking" : "Self test",
 			global_work_size, local_work_size);
 #undef calc_ms
@@ -637,7 +650,7 @@ struct fmt_main FMT_STRUCT = {
 		init,
 		done,
 		reset,
-		fmt_default_prepare,
+		prepare,
 		valid,
 		split,
 		get_binary,

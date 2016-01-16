@@ -25,7 +25,6 @@ john_register_one(&fmt_sshng);
 #include <string.h>
 #include "aes.h"
 #include <openssl/des.h>
-#include <openssl/asn1.h>
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -45,22 +44,24 @@ static int omp_t = 1;
 #include "stdint.h"
 #include "md5.h"
 #include "memdbg.h"
+#include "asn1.h"
 
-#define FORMAT_LABEL		"SSH-ng"
-#define FORMAT_NAME		""
-#define ALGORITHM_NAME		"RSA/DSA 32/" ARCH_BITS_STR
-#define BENCHMARK_COMMENT	""
-#define BENCHMARK_LENGTH	-1001
-#define PLAINTEXT_LENGTH	32
-#define BINARY_SIZE		0
-#define SALT_SIZE		sizeof(struct custom_salt)
-#define BINARY_ALIGN	1
-#define SALT_ALIGN		sizeof(int)
-#define MIN_KEYS_PER_CRYPT	1
-#define MAX_KEYS_PER_CRYPT	1
-#define SAFETY_FACTOR	32
+#define FORMAT_LABEL        "SSH-ng"
+#define FORMAT_NAME         ""
+#define ALGORITHM_NAME      "RSA/DSA/EC/OPENSSH (SSH private keys) 32/" ARCH_BITS_STR
+#define BENCHMARK_COMMENT   ""
+#define BENCHMARK_LENGTH    -1001
+#define PLAINTEXT_LENGTH    32 // XXX
+#define BINARY_SIZE         0
+#define SALT_SIZE           sizeof(struct custom_salt)
+#define BINARY_ALIGN        1
+#define SALT_ALIGN          sizeof(int)
+#define MIN_KEYS_PER_CRYPT  1
+#define MAX_KEYS_PER_CRYPT  1
 
-#define N 8192
+// openssl asn1parse -in test_dsa.key; openssl asn1parse -in test_rsa.key
+#define SAFETY_FACTOR       16  // enough to verify the initial ASN.1 structure (SEQUENCE, INTEGER, Big INTEGER) of RSA, and DSA keys?
+#define N                   8192
 
 static struct fmt_tests sshng_tests[] = {
 	{"$sshng$1$16$570F498F6FF732775EE38648130F600D$1200$1777f12047d4ebab06d052d52946e5e0e73b41d5077b20e1ffe1c97ef9459b8c6844fecc24fdf63314c8889398fa140026339c85336278600e299c0f4c236648ca684f0c122e66d3e860e19eab8b46a564eb101def1c6a38f2f1800040c6b59a66e7b86e145e180f8a126e46544be1e17dd32e4e72f735c9e6b0ca4bbbb32ccf34ba0a7827858b0be32f9e53f13466e2ac78c3fecdf2a51cd7871286a3a91f9c71ae9e857a74bcc06071af6f60d827f7e13ccf6c1be722246c0796f509744c2b1b1452315ea6f86a1c8765d1f0c1d795349b4ea1ba229318b392fe505292cd0c6b4e3e9b2acc13b96943d92fa5635e05b7795989906274b0fb1894102d07facdd8f2122299960e1490823d62bbd5bf6d6c92ed26e68cc2edc93fbffec557a5d187fffe085ded9408ac63293851a684ca10d6e9a4ee9b5c552c827caee1f1c41870fe2d0e79bc4a0b85478fa82a58f947d345122c8ac7c80ba2ae8452b093dda70e2a4329fce70af9cf98e19477a622083664d1e62393a01b20371fc5be9390059f1c4af75d5448a2fbe1aaa46701c696afec927c67d15c046036531d9252faa08bbf9ea0e019ea574e6af94edd7ec17c83c0f87e34c7456e19bc53b2de04dafa83267694c1f61d038e0fc5f8f1b8ce573da470e6db6d38c0e8f7141ad9e9609ea408e3823271e987766039d484bc88f23f2f2a1175636ece950c7d82f43726287fef37da945ec6ad6adc04cb59f66087f68a3e84e8cc39c578bcbce3aaf67f1325d3d20dbd5872cc88ab72fc0bda05bf969eca08f8cafb306424a1597ba5d612e155b4723c2c1bee9a8e3d195be3b798ea417008a2340a919e23ac899ea4dbc4ef05af2cf6b12293eeb293584b37d3f8465e36a62d65b21f68725603e11dc14acf4e3855e25980387a34a34919fdd49844ed888e37199bb26df1bbbc303e895615fcbb0aa9ddc8a2aa685da942a1e68dc3a355d27236f74220d404d25e0ac64ae9203bb04296b4d67481a4f516fd22e47092073c9c44fa098670d736c5c509e55d6b40d3bf346ea5bb0007e32e9d8290c2633621fd84c2f5f428a5649ff3a16d00fec21381543202f2ee12078ddea8a371935f2ffa15aafa644e111a29c1c4703bf8e9cf1397356e296c5484558b96639b9cf3703aabff0cf42864dab91b1e09c6439159bc95374da7a5d416402286390e76cb766cd94e7a002596e8862b8d7e46c1fc6f7bdd0b93c73d2dc3cf58ea31bc549086209f450bb7460d5e9ba0d0f7b80337651f45bf83bef1783c3a15631c82428bfe167dc0692402d7f15144fff01ad8596970439ce8a2df0107c85a23ef93edd19f62de499ab58ada581886494c3e52dd5ec53c191f6d62729729a252c2c0d8024950d1637cfd7c61a4fe64ce41cde76fe00fa2607af66a44d3b4b8836820f40c03669f08b4e986f4d03c09e3c026a910f83be623d7f68ff80d81662f020f433f7a896e10134a278cd9a8517d3bcd77c5287f7d41bc52d2f8db79b5f8f9ed6d6f45a482b13cb91ecdef43ebe38f5ad71836185ae6faf1dd11c50cc1759e4834fcab2b3523d4224a32d2eaba224a2c950dac7524afc74f02f17b511f3b22d577a6928d40909bed64f6ed27096dff591a8fbee3f32733fd2b36c0c4708a5224f165af000d93832e211ae52465f680e7a4fd66bb5eb210c4402eb58f6ebfde", "strongpassword"},
@@ -77,6 +78,8 @@ static struct fmt_tests sshng_tests[] = {
 	/* new ssh key format */
 	{"$sshng$2$16$cc2c3c68c39e0ba6289ed36cb92c3a73$1334$6f70656e7373682d6b65792d7631000000000a6165733235362d636263000000066263727970740000001800000010cc2c3c68c39e0ba6289ed36cb92c3a73000000400000000100000117000000077373682d727361000000030100010000010100af9bf6a900464f154916fac3d80476e0ee739ff7f25a96b562ff9f4262db1972992947dfa89da47f9fa5f4d9e54a2d103ce63779746888c298693663310f054af1c1dc90f62b22f630703726631c03ff217c29a32fd9f9bc178aabe9666c37c2c2bf4a2b4c528efe51e755053216d41e860ef996b549184cd15bd17641128690d2946a76261954edfee942bbefbb182df320d3da7f46a5fcddc15b5ecbf9b1b822cbc9ef978e8b639e8eab2e3b1229d429da4f6bdc27af2f2aab0e187a6cce91b95a8ac6f5602773d0014f1e8124a89e43e502bebb4d21f6a148e208e2d591391d1aede6a0a6d499a3de9996474310dd9d3233e3f05e9d0e85aba44715e838bd000003d08168da8d056f904faf9d80b22c08141e8b068a3af64ace3b5ffbad24b884cd37ae7ad89546031ab834d612b44266b95263a5c38f0d628d704caf70944629ad66d3cef974ec4faaaeb7d7df67f1321bb606ec6e14060c0de1a63a5732ca89b94ae765cb0671a4a1a76b42c06c220546bbf0f8a88471c0bf4200a0cbe0d346be67f688dcf76a3666f7c4447b3ced2d0c9a2fa50abc6ca222ddd70aeb82d65f8fefa313b3db76c5a03478bebc9e0942e17c07ae11d1fbe1b0b380ca2506a26aaf5cdb8668af186d1bc293844bd9c2cc8bb40530387f9a5e11770484593af69384fc003beb82beffa00c1b23f7d6a9bd8f6153cb7abd9531008df384a3455d7cdd7020df4dc507f34e697ad437f01989271b17b93045265f20e6fd02f63ac1e13ec85f8224bc60dd91e15dcfa2ec4f6986e3b37ea6bd571ca18089402f80c121323eb774708cc6ab470e05a53428b65dede47ded97c4f5941be44f6290d5ccdd9bea95b06190efee6c64d874798b6045c5d553a1f68c95f143d0a6893877796fff452851d64ac73c007b91dd6058a5c31165003d9d66b4a1a40c2f82e5c3be6820b109addc0f088c84576e30c7202da3304636de4035f3ca8b032885aa2bedb4d1e134c1615139fb6ed7fa924c2e8abdfcd75da029e910ee8a9d4af594e2a9732115237b6ba3c24f8dfd4bed0a7cb4d96e114bff30e9c68226ae04de6fee2340b41c49cd08982a3f21169853366882a4af43e256cb0d09c88856c46f2ad8a7bcc3896efe5f4f104ef9b595cd08b4b76d6ac074f4fa4a488f508c6106603cb4ca65af819d2222a086ddd16a63021627f337ab9d86b33150808313bfe7368737bf38e7dee410cf08f2effef780d161e2cb734135bba36fe2ee3319cda95242b89b50673c88eb3dfa331e987e3fbde92cec7e019990d97b11c71d5b04b8ec451549abc9ed195a080aefb1d77eff476f9de4315fca5bf6386438869a8d59a5f0badda70b337bb9bdcff966229d631286d3c5b97c41f3ef5daa6ef4416577815214733e8602ef7f8abc3a19ee58f48b10c8ab1d5c76f01febdb29b36910d615d4022849ec117f02b6ae898cc0ff67e61df43284d3ff739ab4c34fe2854797ae0b66e0ba234e236daba6eb9172e9e1f4a0f5283ae9b336059d2ab2c7145e0a4de4b5bed3baf87c90ad4d47b94eb1c01b07510191f06b9eaf014e225b2bce46d5a7080c6d1daf64460836d7630c157e44afc9483a777d76fcafbfc2c4f299211c0465f0151f13707f815700944ad6a17e23e63dd0eecb5cdb5284ad92dd853e0ce136bc77633fef514e6aadeb61e7fe885fe399076cbd5464a6d17efa1e116853e80cf08adea7e550b0d27e6a96d835069674fd7bcc$64", "12345"},
 #endif
+	// EC private key
+	{"$sshng$3$16$00B535FBA963402F20C12648A59D7258$128$dfa09369ff38f33c9789d33760d16fdd47730311b41b51a0c7b1dd1dec850c5c2ff523710af12839f25a709f0076cdd3e3643fab2ea1d17c6fae52a797b55e752b71a1fdd46d5bd889b51ddc2a01922340e5be914a67dabf666aff1c88275bd8ec3529e26386279adeb480446ab869dc27c160bd8fe469d5f993b90aaffef8ce", "password123"},
 	{NULL}
 };
 
@@ -160,6 +163,11 @@ static int valid(char *ciphertext, struct fmt_main *self)
 		if (!isdec(p))
 			goto err;
 	}
+
+	if (cipher != 0 && cipher != 1 && cipher != 2 && cipher != 3) {
+		fprintf(stderr, "[ssh-ng] cipher value of %d is not supported!\n", cipher);
+	}
+
 	MEM_FREE(keeptr);
 	return 1;
 
@@ -298,66 +306,195 @@ static inline int check_padding_only(unsigned char *out, int length)
 	return 0; // valid padding!
 }
 
-static inline int check_padding_and_structure(unsigned char *out, int length)
+static inline int check_padding_and_structure_EC(unsigned char *out, int length, int strict_mode)
 {
-	unsigned char output[N];
-	int ul; /* useful length */
-	unsigned char *res = NULL;
-	unsigned char *p;
-	BIO * outfile;
+	struct asn1_hdr hdr;
+	const uint8_t *pos, *end;
+
+	// First check padding
+	if (check_pkcs_pad(out, length, 16) < 0)
+		return -1;
+
+	/* check BER decoding, EC private key file contains:
+	 *
+	 * SEQUENCE, INTEGER (length 1), OCTET STRING, cont, OBJECT, cont, BIT STRING
+	 *
+	 * $ ssh-keygen -t ecdsa -f unencrypted_ecdsa_sample.key  # don't use a password for testing
+	 * $ openssl asn1parse -in unencrypted_ecdsa_sample.key  # see the underlying structure
+	*/
+
+	// SEQUENCE
+	if (asn1_get_next(out, length, &hdr) < 0 ||
+			hdr.class != ASN1_CLASS_UNIVERSAL ||
+			hdr.tag != ASN1_TAG_SEQUENCE) {
+		goto bad;
+	}
+	pos = hdr.payload;
+	end = pos + hdr.length;
+
+	// version Version (Version ::= INTEGER)
+	if (asn1_get_next(pos, end - pos, &hdr) < 0 ||
+			hdr.class != ASN1_CLASS_UNIVERSAL ||
+			hdr.tag != ASN1_TAG_INTEGER) {
+		goto bad;
+	}
+	pos = hdr.payload + hdr.length;
+	if (hdr.length != 1)
+		goto bad;
+
+	// OCTET STRING
+	if (asn1_get_next(pos, end - pos, &hdr) < 0 ||
+			hdr.class != ASN1_CLASS_UNIVERSAL ||
+			hdr.tag != ASN1_TAG_OCTETSTRING) {
+		goto bad;
+	}
+	pos = hdr.payload + hdr.length;
+	if (hdr.length < 8) // "secp112r1" curve uses 112 bit prime field, rest are bigger
+		goto bad;
+
+	// XXX add more structure checks!
+
+	return 0;
+bad:
+	return -1;
+}
+
+static inline int check_padding_and_structure(unsigned char *out, int length, int strict_mode)
+{
+	struct asn1_hdr hdr;
+	const uint8_t *pos, *end;
 
 	// First check padding
 	if (check_pkcs_pad(out, length, 16) < 0)
 		return -1;
 
 	/* check BER decoding, private key file contains:
+	 *
 	 * RSAPrivateKey = { version = 0, n, e, d, p, q, d mod p-1, d mod q-1, q**-1 mod p }
-	 * DSAPrivateKey = { version = 0, p, q, g, y, x } */
+	 * DSAPrivateKey = { version = 0, p, q, g, y, x }
+	 *
+	 * openssl asn1parse -in test_rsa.key # this shows the structure nicely!
+	 */
 
-	memset(output, 0, N);
-	outfile = BIO_new(BIO_s_mem());
-	ASN1_parse(outfile, out, cur_salt->ctl, 0);
-	BIO_gets(outfile, (char*)output, N);
-	res = memmem(output, 128, "SEQUENCE", 8);
-	if (!res) {
+	// SEQUENCE
+	if (asn1_get_next(out, length, &hdr) < 0 ||
+			hdr.class != ASN1_CLASS_UNIVERSAL ||
+			hdr.tag != ASN1_TAG_SEQUENCE) {
 		goto bad;
 	}
-	BIO_gets(outfile, (char*)output, N);
-	res = memmem(output, 128, ":00", 3);
-	if (!res) {
+	pos = hdr.payload;
+	end = pos + hdr.length;
+
+	// version Version (Version ::= INTEGER)
+	if (asn1_get_next(pos, end - pos, &hdr) < 0 ||
+			hdr.class != ASN1_CLASS_UNIVERSAL ||
+			hdr.tag != ASN1_TAG_INTEGER) {
 		goto bad;
 	}
-	res = memmem(output, 128, "INTEGER", 7);
-	if (!res) {
+	pos = hdr.payload + hdr.length;
+
+	// INTEGER (big one)
+	if (asn1_get_next(pos, end - pos, &hdr) < 0 ||
+			hdr.class != ASN1_CLASS_UNIVERSAL ||
+			hdr.tag != ASN1_TAG_INTEGER) {
 		goto bad;
 	}
-	/* one more level of check */
-	BIO_gets(outfile, (char*)output, N);
-	res = memmem(output, 128, "INTEGER", 7);
-	if (!res) {
-		goto bad;
-	}
+	pos = hdr.payload + hdr.length;
 	/* NOTE: now this integer has to be big, is this always true?
 	 * RSA (as used in ssh) uses big prime numbers, so this check should be OK */
-	ul = strlen((char*)res);
-	p = res;
-	while(*p) {
-		if (isspace(*p))
-			ul--;
-		p++;
-	}
-	if (ul < 32)
+	if (hdr.length < 64) {
 		goto bad;
-	BIO_free(outfile);
+	}
+
+	if (strict_mode) {
+		// INTEGER (small one)
+		if (asn1_get_next(pos, end - pos, &hdr) < 0 ||
+				hdr.class != ASN1_CLASS_UNIVERSAL ||
+				hdr.tag != ASN1_TAG_INTEGER) {
+			goto bad;
+		}
+		pos = hdr.payload + hdr.length;
+
+		// INTEGER (big one again)
+		if (asn1_get_next(pos, end - pos, &hdr) < 0 ||
+				hdr.class != ASN1_CLASS_UNIVERSAL ||
+				hdr.tag != ASN1_TAG_INTEGER) {
+			goto bad;
+		}
+		pos = hdr.payload + hdr.length;
+		if (hdr.length < 32) {
+			goto bad;
+		}
+	}
+
 	return 0;
 bad:
-	BIO_free(outfile);
 	return -1;
-
 }
 
 int bcrypt_pbkdf(const char *pass, size_t passlen, const uint8_t *salt, size_t saltlen,
 	uint8_t *key, size_t keylen, unsigned int rounds);
+
+
+static void common_crypt_code(char *password, unsigned char *out, int full_decrypt)
+{
+	if (cur_salt->cipher == 0) {
+		unsigned char key[24] = {0};
+		DES_cblock key1, key2, key3;
+		DES_cblock ivec;
+		DES_key_schedule ks1, ks2, ks3;
+		generate24key_bytes((unsigned char*)password, key);
+		memset(out, 0, SAFETY_FACTOR);
+		memcpy(key1, key, 8);
+		memcpy(key2, key + 8, 8);
+		memcpy(key3, key + 16, 8);
+		DES_set_key((DES_cblock *) key1, &ks1);
+		DES_set_key((DES_cblock *) key2, &ks2);
+		DES_set_key((DES_cblock *) key3, &ks3);
+		memcpy(ivec, cur_salt->salt, 8);
+		if (full_decrypt) {
+			DES_ede3_cbc_encrypt(cur_salt->ct, out, cur_salt->ctl, &ks1, &ks2, &ks3, &ivec, DES_DECRYPT);
+		} else {
+			DES_ede3_cbc_encrypt(cur_salt->ct, out, SAFETY_FACTOR, &ks1, &ks2, &ks3, &ivec, DES_DECRYPT);
+			DES_ede3_cbc_encrypt(cur_salt->ct + cur_salt->ctl - 32, out + cur_salt->ctl - 32, 32, &ks1, &ks2, &ks3, &ivec, DES_DECRYPT);
+		}
+	} else if (cur_salt->cipher == 1) {
+		unsigned char key[16] = {0};
+		AES_KEY akey;
+		unsigned char iv[16];
+		memcpy(iv, cur_salt->salt, 16);
+		memset(out, 0, SAFETY_FACTOR);
+		memset(out + cur_salt->ctl - 32, 0, 32);
+		generate16key_bytes((unsigned char*)password, key);
+		AES_set_decrypt_key(key, 128, &akey);
+		if (full_decrypt) {
+			AES_cbc_encrypt(cur_salt->ct, out, cur_salt->ctl, &akey, iv, AES_DECRYPT);
+		} else {
+			AES_cbc_encrypt(cur_salt->ct, out, SAFETY_FACTOR, &akey, iv, AES_DECRYPT); // are starting SAFETY_FACTOR bytes enough?
+			// decrypting 1 blocks (16 bytes) is enough for correct padding check
+		}
+		memcpy(iv, cur_salt->ct + cur_salt->ctl - 32, 16);
+		AES_cbc_encrypt(cur_salt->ct + cur_salt->ctl - 16, out + cur_salt->ctl - 16, 16, &akey, iv, AES_DECRYPT);
+	} else if (cur_salt->cipher == 2) {  /* new ssh key format handling */
+		unsigned char key[32+16] = {0};
+		AES_KEY akey;
+		unsigned char iv[16];
+		// derive (key length + iv length) bytes
+		bcrypt_pbkdf(password, strlen((const char*)password), cur_salt->salt, 16, key, 32 + 16, cur_salt->rounds);
+		AES_set_decrypt_key(key, 256, &akey);
+		memcpy(iv, key + 32, 16);
+		AES_cbc_encrypt(cur_salt->ct + cur_salt->ctl - 32, out, 32, &akey, iv, AES_DECRYPT); // decrypt 2 blocks
+	} else if (cur_salt->cipher == 3) { // EC keys with AES-128
+		unsigned char key[16] = {0};
+		AES_KEY akey;
+		unsigned char iv[16];
+		memcpy(iv, cur_salt->salt, 16);
+		memset(out, 0, N);
+		generate16key_bytes((unsigned char*)password, key);
+		AES_set_decrypt_key(key, 128, &akey);
+		AES_cbc_encrypt(cur_salt->ct, out, cur_salt->ctl, &akey, iv, AES_DECRYPT); // full decrypt
+	}
+}
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
@@ -369,68 +506,27 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	for (index = 0; index < count; index++)
 #endif
 	{
-		if (cur_salt->cipher == 0) {
-			unsigned char key[24] = {0};
-			unsigned char out[N];
-			DES_cblock key1, key2, key3;
-			DES_cblock ivec;
-			DES_key_schedule ks1, ks2, ks3;
-			generate24key_bytes((unsigned char*)saved_key[index], key);
-			memset(out, 0, SAFETY_FACTOR);
-			memcpy(key1, key, 8);
-			memcpy(key2, key + 8, 8);
-			memcpy(key3, key + 16, 8);
-			DES_set_key((DES_cblock *) key1, &ks1);
-			DES_set_key((DES_cblock *) key2, &ks2);
-			DES_set_key((DES_cblock *) key3, &ks3);
-			memcpy(ivec, cur_salt->salt, 8);
-			// DES_ede3_cbc_encrypt(cur_salt->ct, out, cur_salt->ctl, &ks1, &ks2, &ks3, &ivec, DES_DECRYPT);
-			DES_ede3_cbc_encrypt(cur_salt->ct, out, SAFETY_FACTOR, &ks1, &ks2, &ks3, &ivec, DES_DECRYPT);
-			DES_ede3_cbc_encrypt(cur_salt->ct + cur_salt->ctl - 32, out + cur_salt->ctl - 32, 32, &ks1, &ks2, &ks3, &ivec, DES_DECRYPT);
+		unsigned char out[N];
+		common_crypt_code(saved_key[index], out, 0); // don't do full decryption (except for EC keys)
 
-			if (check_padding_and_structure(out, cur_salt->ctl) == 0)
+		if (cur_salt->cipher == 0 || cur_salt->cipher == 1) {
+			if (check_padding_and_structure(out, cur_salt->ctl, 0) == 0)
 				cracked[index] = 1;
 			else
 				cracked[index] = 0;
-		}
-		else if (cur_salt->cipher == 1) {
-			unsigned char key[16] = {0};
-			unsigned char out[N];
-			// unsigned char out[N] = {0};
-			AES_KEY akey;
-			unsigned char iv[16];
-			memcpy(iv, cur_salt->salt, 16);
-			memset(out, 0, SAFETY_FACTOR);
-			memset(out + cur_salt->ctl - 32, 0, 32);
-			generate16key_bytes((unsigned char*)saved_key[index], key);
-			AES_set_decrypt_key(key, 128, &akey);
-			// AES_cbc_encrypt(cur_salt->ct, out, cur_salt->ctl, &akey, iv, AES_DECRYPT);
-			// dirty hack!
-			AES_cbc_encrypt(cur_salt->ct, out, SAFETY_FACTOR, &akey, iv, AES_DECRYPT); // are starting SAFETY_FACTOR bytes enough?
-			// decrypting 1 blocks (16 bytes) is enough for correct padding check
-			memcpy(iv, cur_salt->ct + cur_salt->ctl - 32, 16);
-			AES_cbc_encrypt(cur_salt->ct + cur_salt->ctl - 16, out + cur_salt->ctl - 16, 16, &akey, iv, AES_DECRYPT);
-			if (check_padding_and_structure(out, cur_salt->ctl) == 0)
-				cracked[index] = 1;
-			else
-				cracked[index] = 0;
-		}
-		else {  /* new ssh key format handling */
-			unsigned char key[32+16] = {0};
-			unsigned char out[32] = {0};
-			AES_KEY akey;
-			unsigned char iv[16];
-			// derive (key length + iv length) bytes
-			bcrypt_pbkdf(saved_key[index], strlen(saved_key[index]), cur_salt->salt, 16, key, 32 + 16, cur_salt->rounds);
-			AES_set_decrypt_key(key, 256, &akey);
-			memcpy(iv, key + 32, 16);
-			AES_cbc_encrypt(cur_salt->ct + cur_salt->ctl - 32, out, 32, &akey, iv, AES_DECRYPT); // decrypt 2 blocks
+		} else if (cur_salt->cipher == 2) {  // new ssh key format handling
 			if (check_padding_only(out + 16, 16) == 0) /* always check the last block (16 bytes) */
+				cracked[index] = 1;
+			else
+				cracked[index] = 0;
+		} else if (cur_salt->cipher == 3) { // EC keys
+			if (check_padding_and_structure_EC(out, cur_salt->ctl, 0) == 0)
 				cracked[index] = 1;
 			else
 				cracked[index] = 0;
 		}
 	}
+
 	return count;
 }
 
@@ -450,7 +546,24 @@ static int cmp_one(void *binary, int index)
 
 static int cmp_exact(char *source, int index)
 {
-    return 1;
+	unsigned char out[N];
+	common_crypt_code(saved_key[index], out, 1); // do full decryption!
+
+	if (cur_salt->cipher == 0 || cur_salt->cipher == 1) {
+		if (check_padding_and_structure(out, cur_salt->ctl, 1) == 0)
+			return 1;
+		else
+			return 0;
+	} else if (cur_salt->cipher == 2) {  /* new ssh key format handling */
+		if (check_padding_only(out + 16, 16) == 0) /* always check the last block (16 bytes) */
+			return 1;
+		else
+			return 0;
+	} else if (cur_salt->cipher == 3) { // EC keys
+		return 1;
+	}
+
+	return 0;
 }
 
 static void sshng_set_key(char *key, int index)

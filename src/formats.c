@@ -44,7 +44,6 @@ extern volatile int bench_running;
 
 #ifndef BENCH_BUILD
 static int orig_min, orig_max, orig_len;
-#endif
 
 static void test_fmt_split_unifies_case_4(struct fmt_main *format, char *ciphertext, int *is_split_unifies_case, int call_cnt);
 static void test_fmt_split_unifies_case_3(struct fmt_main *format,
@@ -52,12 +51,13 @@ static void test_fmt_split_unifies_case_3(struct fmt_main *format,
 static void test_fmt_split_unifies_case(struct fmt_main *format, char *ciphertext, int *is_split_unifies_case, int call_cnt);
 static void get_longest_common_string(char *fstr, char *sstr, int *first_index,
 	int *second_index, int *size);
+#endif
 static void test_fmt_8_bit(struct fmt_main *format, void *binary,
 	char *ciphertext, char *plaintext, int *is_ignore_8th_bit,
-	int *plaintext_is_blank);
+	int *plaintext_is_blank, struct db_salt *dbsalt);
 static void test_fmt_case(struct fmt_main *format, void *binary,
 	char *ciphertext, char* plaintext, int *is_case_sensitive,
-	int *plaintext_has_alpha);
+	int *plaintext_has_alpha, struct db_salt *dbsalt);
 
 void fmt_register(struct fmt_main *format)
 {
@@ -181,7 +181,7 @@ static char *longcand(struct fmt_main *format, int index, int ml)
 	memset(out, '!' + (index & 31), ml);
 	if (!(format->params.flags & FMT_8_BIT) ||
 #ifndef BENCH_BUILD
-	    !(format->params.flags & FMT_CASE) || pers_opts.target_enc == UTF_8
+	    !(format->params.flags & FMT_CASE) || options.target_enc == UTF_8
 #else
 	    !(format->params.flags & FMT_CASE)
 #endif
@@ -195,7 +195,8 @@ static char *longcand(struct fmt_main *format, int index, int ml)
 }
 
 static char* is_key_right(struct fmt_main *format, int index,
-	void *binary, char *ciphertext, char *plaintext, int is_test_fmt_case)
+	void *binary, char *ciphertext, char *plaintext,
+	int is_test_fmt_case, struct db_salt *dbsalt)
 {
 	static char err_buf[100];
 	int i, size, count, match, len;
@@ -205,9 +206,10 @@ static char* is_key_right(struct fmt_main *format, int index,
 		return "index should be 0 when test_fmt_case";
 
 	count = index + 1;
-	match = format->methods.crypt_all(&count, NULL);
+	match = format->methods.crypt_all(&count, dbsalt);
 
-	if (!format->methods.cmp_all(binary, match)) {
+	if ((match && !format->methods.cmp_all(binary, match)) ||
+	    (!match && format->methods.cmp_all(binary, match))) {
 		sprintf(err_buf, "cmp_all(%d)", match);
 		return err_buf;
 	}
@@ -311,6 +313,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 	int salt_cleaned_warned = 0, binary_cleaned_warned = 0;
 	int salt_dupe_warned = 0, i;
 #ifndef BENCH_BUILD
+	int cnt_split_unifies_case = 0;// just in case only the last test case unifies.
 	int dhirutest = 0;
 	int maxlength = 0;
 	int extra_tests = options.flags & FLG_TEST_SET;
@@ -324,11 +327,11 @@ static char *fmt_self_test_body(struct fmt_main *format,
 	int is_ignore_8th_bit = 1;     // Is ignore 8th bit, FMT_8_BIT
 	int is_split_unifies_case = 0; // Is split() unifies case
 	int is_split_unifies_case_4 = 0;
-	int cnt_split_unifies_case = 0;// just in case only the last test case unifies.
 	int is_change_case = 0;        // Is change cases of ciphertext and it is valid
 	int is_need_unify_case = 1;    // Is need to unify cases in split()
 	int fmt_split_case = ((format->params.flags & FMT_SPLIT_UNIFIES_CASE)==FMT_SPLIT_UNIFIES_CASE);
 	int while_condition;           // since -test and -test-full use very do{}while(cond) so we use a var.
+	struct db_salt *dbsalt;
 
 	// validate that there are no NULL function pointers
 	if (format->methods.prepare == NULL)    return "method prepare NULL";
@@ -365,7 +368,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 	while ((current++)->ciphertext)
 		ntests++;
 	current = format->params.tests;
-#ifdef _MSC_VER
+#if defined (_MSC_VER) && !defined (BENCH_BUILD)
 	if (current->ciphertext[0] == 0 &&
 	    !strcasecmp(format->params.label, "LUKS")) {
 		// luks has a string that is longer than the 64k max string length of
@@ -429,7 +432,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 #ifndef BENCH_BUILD
 	/* UTF-8 bodge in reverse. Otherwise we will get truncated keys back
 	   from the max-length self-test */
-	if ((pers_opts.target_enc == UTF_8) &&
+	if ((options.target_enc == UTF_8) &&
 	    (format->params.flags & FMT_UTF8) &&
 	    (format->params.flags & FMT_UNICODE))
 		ml /= 3;
@@ -511,7 +514,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 						*p = 0;
 						// $tag$ only
 						if (format->methods.valid(k, format)) {
-							sprintf(s_size, "promiscuous valid (%s)", k);
+							snprintf(s_size, sizeof(s_size), "promiscuous valid (%s)", k);
 							return s_size;
 						}
 						*p = '$';
@@ -528,7 +531,6 @@ static char *fmt_self_test_body(struct fmt_main *format,
 				MEM_FREE(k);
 			}
 		}
-#endif
 		if (full_lvl >= 0) {
 			// numerous tests. We need to 'merge' into 1, probably.
 			if (!fmt_split_case && format->params.binary_size && is_need_unify_case)
@@ -537,6 +539,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 			test_fmt_split_unifies_case_4(format, ciphertext, &is_split_unifies_case_4, cnt_split_unifies_case);
 			++cnt_split_unifies_case;
 		}
+#endif
 
 		ciphertext = format->methods.split(ciphertext, 0, format);
 		if (!ciphertext)
@@ -694,14 +697,6 @@ static char *fmt_self_test_body(struct fmt_main *format,
 		if (strcmp(ciphertext,
 		    format->methods.source(ciphertext, binary)))
 			return "source";
-#else
-		if (strcmp(ciphertext,
-		    format->methods.source(ciphertext, binary))) {
-			//static char LargeBuf[500];
-			//sprintf(LargeBuf, "source\n%.200s\n%.200s\n", ciphertext, format->methods.source(ciphertext, binary));
-			//return LargeBuf;
-			return "source";
-		}
 #endif
 
 		if ((unsigned int)format->methods.salt_hash(salt) >=
@@ -709,6 +704,23 @@ static char *fmt_self_test_body(struct fmt_main *format,
 			return "salt_hash";
 
 		format->methods.set_salt(salt);
+#ifdef JUMBO_JTR
+		if (strcmp(ciphertext,
+		    format->methods.source(ciphertext, binary))) {
+			return "source";
+		}
+#ifndef BENCH_BUILD
+		if ((dbsalt = db->salts))
+		do {
+			if (!dyna_salt_cmp(salt, dbsalt->salt,
+			                   format->params.salt_size))
+				break;
+		} while ((dbsalt = dbsalt->next));
+		if (db->salts && !dbsalt) {
+			return "Could not find salt in db - salt() return inconsistent?";
+		}
+#endif
+#endif
 #ifndef JUMBO_JTR
 		format->methods.set_key(current->plaintext, index);
 
@@ -758,7 +770,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 			advance_cursor();
 #endif
 			/* 2. Perform a limited crypt (in case it matters) */
-			if (format->methods.crypt_all(&min, NULL) != min)
+			if (format->methods.crypt_all(&min, db->salts) != min)
 				return "crypt_all";
 #endif
 #if defined(HAVE_OPENCL) || defined(HAVE_CUDA)
@@ -792,13 +804,13 @@ static char *fmt_self_test_body(struct fmt_main *format,
 			// Test FMT_CASE
 			format->methods.clear_keys();
 			test_fmt_case(format, binary, ciphertext, plaintext,
-				&is_case_sensitive, &plaintext_has_alpha);
+				&is_case_sensitive, &plaintext_has_alpha, dbsalt);
 
 			// Test FMT_8_BIT
 			format->methods.clear_keys();
 			format->methods.set_salt(salt);
 			test_fmt_8_bit(format, binary, ciphertext, plaintext,
-				&is_ignore_8th_bit, &plaintext_is_blank);
+				&is_ignore_8th_bit, &plaintext_is_blank, dbsalt);
 
 			format->methods.clear_keys();
 			format->methods.set_salt(salt);
@@ -816,14 +828,14 @@ static char *fmt_self_test_body(struct fmt_main *format,
 		advance_cursor();
 #endif
 		if (full_lvl >= 0) {
-			ret = is_key_right(format, max - 1, binary, ciphertext, plaintext, 0);
+			ret = is_key_right(format, max - 1, binary, ciphertext, plaintext, 0, dbsalt);
 			if (ret)
 				return ret;
 			format->methods.clear_keys();
 			dyna_salt_remove(salt);
 			while_condition = (++current)->ciphertext != NULL;
 		} else {
-		ret = is_key_right(format, index, binary, ciphertext, plaintext, 0);
+			ret = is_key_right(format, index, binary, ciphertext, plaintext, 0, dbsalt);
 		if (ret)
 			return ret;
 
@@ -1008,7 +1020,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
 
 static void test_fmt_case(struct fmt_main *format, void *binary,
 	char *ciphertext, char* plaintext, int *is_case_sensitive,
-	int *plaintext_has_alpha)
+	int *plaintext_has_alpha, struct db_salt *dbsalt)
 {
 	char *plain_copy, *pk;
 
@@ -1034,7 +1046,7 @@ static void test_fmt_case(struct fmt_main *format, void *binary,
 	*plaintext_has_alpha = 1;
 	fmt_set_key(plain_copy, 0);
 
-	if (is_key_right(format, 0, binary, ciphertext, plain_copy, 1))
+	if (is_key_right(format, 0, binary, ciphertext, plain_copy, 1, dbsalt))
 		*is_case_sensitive = 1;
 
 out:
@@ -1043,7 +1055,7 @@ out:
 
 static void test_fmt_8_bit(struct fmt_main *format, void *binary,
 	char *ciphertext, char *plaintext, int *is_ignore_8th_bit,
-	int *plaintext_is_blank)
+	int *plaintext_is_blank, struct db_salt *dbsalt)
 {
 	char *plain_copy, *pk, *ret_all_set, *ret_none_set;
 
@@ -1061,7 +1073,8 @@ static void test_fmt_8_bit(struct fmt_main *format, void *binary,
 	}
 
 	fmt_set_key(plain_copy, 0);
-	ret_all_set = is_key_right(format, 0, binary, ciphertext, plain_copy, 0);
+	ret_all_set = is_key_right(format, 0, binary, ciphertext,
+	                           plain_copy, 0, dbsalt);
 
 	format->methods.clear_keys();
 
@@ -1073,7 +1086,8 @@ static void test_fmt_8_bit(struct fmt_main *format, void *binary,
 	}
 
 	fmt_set_key(plain_copy, 0);
-	ret_none_set = is_key_right(format, 0, binary, ciphertext, plain_copy, 0);
+	ret_none_set = is_key_right(format, 0, binary, ciphertext,
+	                            plain_copy, 0, dbsalt);
 
 	if (ret_all_set != ret_none_set)
 		*is_ignore_8th_bit = 0;
@@ -1081,6 +1095,7 @@ static void test_fmt_8_bit(struct fmt_main *format, void *binary,
 	MEM_FREE(plain_copy);
 }
 
+#ifndef BENCH_BUILD
 static int chrcasecmp(char lc, char rc)
 {
 	if (lc >= 'a' && lc <= 'z')
@@ -1148,7 +1163,7 @@ static void get_longest_common_string(char *fstr, char *sstr, int *first_index,
  */
 static void test_fmt_split_unifies_case(struct fmt_main *format, char *ciphertext, int *is_split_unifies_case, int call_cnt)
 {
-	char *cipher_copy, *ret, *bin_hex, *ret_copy=0;
+	char *cipher_copy, *ret, *bin_hex=0, *ret_copy=0;
 	void *bin;
 	int first_index, second_index, size, index;
 	int change_count = 0;
@@ -1174,7 +1189,7 @@ static void test_fmt_split_unifies_case(struct fmt_main *format, char *ciphertex
 		ret_copy = strdup(ret);
 		bin = format->methods.binary(ret_copy);
 		if (format->params.binary_size>4) {
-			bin_hex = mem_alloc(format->params.binary_size*2 + 4);
+			bin_hex = mem_alloc(format->params.binary_size*2+1);
 			base64_convert(bin, e_b64_raw, format->params.binary_size, bin_hex, e_b64_hex, format->params.binary_size*2+1, 0);
 			cp = strstr(ret_copy, bin_hex);
 			strupr(bin_hex);
@@ -1198,7 +1213,7 @@ static void test_fmt_split_unifies_case(struct fmt_main *format, char *ciphertex
 			MEM_FREE(bin_hex);
 		}
 		if (format->params.salt_size>4 && format->params.salt_size < strlen(ret_copy)-10) {
-			bin_hex = mem_alloc(format->params.salt_size*2 + 4);
+			bin_hex = mem_alloc(format->params.salt_size*2+1);
 			bin = format->methods.salt(ret_copy);
 			dyna_salt_create(bin);
 			base64_convert(bin, e_b64_raw, format->params.salt_size, bin_hex, e_b64_hex, format->params.salt_size*2+1, 0);
@@ -1518,6 +1533,7 @@ change_case:
 		*is_split_unifies_case = 0;
 	return;
 }
+#endif
 
 /*
  * Allocate memory for a copy of a binary ciphertext or salt with only the

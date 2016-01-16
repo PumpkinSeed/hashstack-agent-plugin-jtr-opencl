@@ -254,7 +254,7 @@ static void init(struct fmt_main *_self)
 
 	CRC32_Init(&crc);
 
-	if (pers_opts.target_enc == UTF_8)
+	if (options.target_enc == UTF_8)
 		self->params.plaintext_length = MIN(125, 3 * PLAINTEXT_LENGTH);
 }
 
@@ -286,7 +286,7 @@ static void reset(struct db_main *db)
 		opencl_init_auto_setup(SEED, HASH_LOOPS, split_events,
 		                       warn, 2, self,
 		                       create_clobj, release_clobj,
-		                       sizeof(sevenzip_state), 0);
+		                       sizeof(sevenzip_state), 0, db);
 
 		//  Auto tune execution from shared/included code.
 		autotune_run(self, 1 << 19, 0, 15000000000ULL);

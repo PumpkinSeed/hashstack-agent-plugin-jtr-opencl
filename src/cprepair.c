@@ -15,6 +15,7 @@
 #include <unistd.h>
 #endif
 
+#include "params.h"
 #include "unicode.h"
 #include "memdbg.h"
 
@@ -23,7 +24,6 @@
 static int sup, noguess, potfile;
 static int inv_cp, auto_cp;
 struct options_main options;
-struct pers_opts pers_opts;
 
 #undef LINE_BUFFER_SIZE
 #define LINE_BUFFER_SIZE 0x10000
@@ -193,14 +193,14 @@ static int process_file(char *name)
 				}
 			}
 
-			if (options.verbosity > 4)
+			if (options.verbosity == VERB_MAX)
 				dump_stuff_msg(orig, orig, len);
 
 			plain = strchr(orig, ':');
 			if (potfile && plain) {
 				len -= (++plain - orig);
 				convin = plain;
-				if (options.verbosity > 4)
+				if (options.verbosity == VERB_MAX)
 					dump_stuff_msg(convin, convin, len);
 			} else
 				convin = skip_bom(orig);
@@ -213,19 +213,20 @@ static int process_file(char *name)
 					out = convin;
 				} else {
 					if (auto_cp != inv_cp)
-						pers_opts.internal_cp =
-							pers_opts.target_enc =
+						options.internal_cp =
+							options.target_enc =
 							contains_ascii_letters(convin) ?
 							inv_cp : auto_cp;
 					else
-						pers_opts.internal_cp =
-							pers_opts.target_enc =
+						options.internal_cp =
+							options.target_enc =
 							inv_cp;
 					initUnicode(0);
 
 					enc_to_utf16(u16, sizeof(u16), (UTF8*)convin, len);
 					out = (char*)utf16_to_utf8_r(u8buf, sizeof(u8buf), u16);
-					if (options.verbosity > 3 && strcmp(convin, out))
+					if (options.verbosity > VERB_DEFAULT &&
+					    strcmp(convin, out))
 						printf("%s -> ", orig);
 				}
 			} else if (valid > 1) {
@@ -239,8 +240,8 @@ static int process_file(char *name)
 					              (UTF8*)dd, len);
 					if (!valid_ansi(u16))
 						break;
-					pers_opts.internal_cp =
-						pers_opts.target_enc =
+					options.internal_cp =
+						options.target_enc =
 						ISO_8859_1;
 					initUnicode(0);
 					u8 = utf16_to_enc_r(u8buf,
@@ -249,11 +250,11 @@ static int process_file(char *name)
 					    !valid_utf8(u8))
 						break;
 					strcpy(dd, (char*)u8);
-					if (options.verbosity > 4)
+					if (options.verbosity == VERB_MAX)
 						fprintf(stderr, "Double-encoding\n");
 				}
 
-				if (options.verbosity > 3 &&
+				if (options.verbosity > VERB_DEFAULT &&
 				    strcmp(convin, out))
 					printf("%s => ", convin);
 			}
@@ -274,9 +275,9 @@ static int process_file(char *name)
 
 int main(int argc, char **argv)
 {
-	char c;
+	signed char c;
 
-	options.verbosity = 3;
+	options.verbosity = VERB_DEFAULT;
 
 	while ((c = getopt(argc, argv, "si:f:hldpn")) != -1) {
 		switch (c) {
@@ -314,7 +315,7 @@ int main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	pers_opts.input_enc = UTF_8;
+	options.input_enc = UTF_8;
 
 	if (!auto_cp)
 		auto_cp = CP1252;
@@ -328,7 +329,7 @@ int main(int argc, char **argv)
 	while (*argv) {
 		int ret;
 
-		if (options.verbosity > 3)
+		if (options.verbosity > VERB_DEFAULT)
 			printf("filename: %s\n", *argv);
 		ret = process_file(*argv++);
 		if (ret != EXIT_SUCCESS)

@@ -18,9 +18,11 @@ john_register_one(&fmt_rawMD5);
 #include "arch.h"
 
 #include "md5.h"
+#include "misc.h"	// error()
 #include "common.h"
 #include "johnswap.h"
 #include "formats.h"
+#include "base64_convert.h"
 
 #if !FAST_FORMATS_OMP
 #undef _OPENMP
@@ -88,6 +90,7 @@ static struct fmt_tests tests[] = {
 	{FORMAT_TAG "57edf4a22be3c955ac49da2e2107b67a","12345678901234567890123456789012345678901234567890123456789012345678901234567890"},
 #endif
 #endif
+	{"{MD5}CY9rzUYh03PK3k6DJie09g==", "test"},
 	{NULL}
 };
 
@@ -145,6 +148,24 @@ static void done(void)
 #endif
 }
 
+/* Convert {MD5}CY9rzUYh03PK3k6DJie09g== to 098f6bcd4621d373cade4e832627b4f6 */
+static char *prepare(char *fields[10], struct fmt_main *self)
+{
+	static char out[CIPHERTEXT_LENGTH + 1];
+
+	if (!strncmp(fields[1], "{MD5}", 5) && strlen(fields[1]) == 29) {
+		int res;
+
+		res = base64_convert(&fields[1][5], e_b64_mime, 24,
+		                     out, e_b64_hex, sizeof(out),
+		                     flg_Base64_HEX_LOCASE);
+		if (res >= 0)
+			return out;
+	}
+
+	return fields[1];
+}
+
 static int valid(char *ciphertext, struct fmt_main *self)
 {
 	char *p, *q;
@@ -185,17 +206,18 @@ static void *get_binary(char *ciphertext)
 	ciphertext += TAG_LENGTH;
 	for (i=0; i<4; i++)
 	{
-		temp  = (atoi16[ARCH_INDEX(ciphertext[i*8+0])])<<4;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+1])]);
+		temp  = ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+0])]))<<4;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+1])]));
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+2])])<<12;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+3])])<<8;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+2])]))<<12;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+3])]))<<8;
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+4])])<<20;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+5])])<<16;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+4])]))<<20;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+5])]))<<16;
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+6])])<<28;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+7])])<<24;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+6])]))<<28;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+7])]))<<24;
+
 
 #if ARCH_LITTLE_ENDIAN
 		out[i]=temp;
@@ -222,6 +244,10 @@ static char *source(char *source, void *binary)
 
 #if SIMD_COEF_32 && defined(REVERSE_STEPS)
 	md5_unreverse(b);
+#endif
+
+#if ARCH_LITTLE_ENDIAN==0
+	alter_endianity(b, 16);
 #endif
 
 	p = &out[TAG_LENGTH];
@@ -263,7 +289,7 @@ static void set_key(char *_key, int index)
 		}
 		if (!(temp & 0xff000000))
 		{
-			*keybuf_word = temp | (0x80 << 24);
+			*keybuf_word = temp | (0x80U << 24);
 			len+=3;
 			goto key_cleaning;
 		}
@@ -449,7 +475,7 @@ struct fmt_main fmt_rawMD5 = {
 		init,
 		done,
 		fmt_default_reset,
-		fmt_default_prepare,
+		prepare,
 		valid,
 		split,
 		get_binary,

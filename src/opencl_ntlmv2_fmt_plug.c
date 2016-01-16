@@ -285,7 +285,7 @@ static void init(struct fmt_main *_self)
 		self->params.algorithm_name = valgo;
 	}
 
-	if (pers_opts.target_enc == UTF_8)
+	if (options.target_enc == UTF_8)
 		max_len = self->params.plaintext_length = 3 * PLAINTEXT_LENGTH;
 }
 
@@ -300,7 +300,7 @@ static void reset(struct db_main *db)
 		         "-DUCS_2 "
 #endif
 		         "-D%s -DPLAINTEXT_LENGTH=%u -DV_WIDTH=%u",
-		         cp_id2macro(pers_opts.target_enc), PLAINTEXT_LENGTH, ocl_v_width);
+		         cp_id2macro(options.target_enc), PLAINTEXT_LENGTH, ocl_v_width);
 		opencl_init("$JOHN/kernels/ntlmv2_kernel.cl", gpu_id, build_opts);
 
 		/* create kernels to execute */
@@ -314,7 +314,7 @@ static void reset(struct db_main *db)
 		//Initialize openCL tuning (library) for this format.
 		opencl_init_auto_setup(SEED, 0, NULL, warn, 3, self,
 		                       create_clobj, release_clobj,
-		                       2 * ocl_v_width * max_len, gws_limit);
+		                       2 * ocl_v_width * max_len, gws_limit, db);
 
 		//Auto tune execution from shared/included code.
 		autotune_run(self, 11, gws_limit, 500);

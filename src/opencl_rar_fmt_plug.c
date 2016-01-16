@@ -284,7 +284,7 @@ static void init(struct fmt_main *_self)
 	omp_t = omp_get_max_threads();
 #endif /* _OPENMP */
 
-	if (pers_opts.target_enc == UTF_8)
+	if (options.target_enc == UTF_8)
 		self->params.plaintext_length = MIN(125, 3 * PLAINTEXT_LENGTH);
 
 	unpack_data = mem_calloc(omp_t, sizeof(unpack_data_t));
@@ -316,7 +316,7 @@ static void reset(struct db_main *db)
 		opencl_init_auto_setup(SEED, HASH_LOOPS, split_events,
 		                       warn, 3, self,
 		                       create_clobj, release_clobj,
-		                       UNICODE_LENGTH + sizeof(cl_int) * 14, 0);
+		                       UNICODE_LENGTH + sizeof(cl_int) * 14, 0, db);
 
 		//Auto tune execution from shared/included code.
 		autotune_run(self, ITERATIONS, 0,

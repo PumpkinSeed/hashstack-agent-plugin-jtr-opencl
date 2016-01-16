@@ -188,7 +188,7 @@ static void init(struct fmt_main *self)
 	// block is written to after this, if there are more that one SHA_PARA, then the start of each para block will be updated inside the inner loop.
 #endif
 
-	if (pers_opts.target_enc == UTF_8) {
+	if (options.target_enc == UTF_8) {
 		// UTF8 may be up to three bytes per character
 		// but core max. is 125 anyway
 		//self->params.plaintext_length = MIN(125, 3*PLAINTEXT_LENGTH);
@@ -197,7 +197,7 @@ static void init(struct fmt_main *self)
 		tests[2].plaintext = "\xe2\x82\xac\xe2\x82\xac"; // 2 x Euro signs
 		tests[2].ciphertext = "$DCC2$10240#joe#1e1e20f482ff748038e47d801d0d1bda";
 	}
-	else if (pers_opts.target_enc == ISO_8859_1) {
+	else if (options.target_enc == ISO_8859_1) {
 		tests[1].plaintext = "\xfc";
 		tests[1].ciphertext = "$DCC2$10240#joe#bdb80f2c4656a8b8591bd27d39064a54";
 		tests[2].plaintext = "\xfc\xfc";
@@ -377,23 +377,23 @@ static void *get_binary(char *ciphertext)
 	for (; i < 4 ;i++)
 	{
 #if ARCH_LITTLE_ENDIAN
-		temp  = (atoi16[ARCH_INDEX(ciphertext[i * 8 + 0])]) << 4;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 1])]);
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 2])]) << 12;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 3])]) << 8;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 4])]) << 20;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 5])]) << 16;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 6])]) << 28;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 7])]) << 24;
+		temp  = ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 0])])) << 4;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 1])]));
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 2])])) << 12;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 3])])) << 8;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 4])])) << 20;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 5])])) << 16;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 6])])) << 28;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 7])])) << 24;
 #else
-		temp  = (atoi16[ARCH_INDEX(ciphertext[i * 8 + 6])]) << 4;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 7])]);
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 4])]) << 12;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 5])]) << 8;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 2])]) << 20;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 3])]) << 16;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 0])]) << 28;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i * 8 + 1])]) << 24;
+		temp  = ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 6])])) << 4;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 7])]));
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 4])])) << 12;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 5])])) << 8;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 2])])) << 20;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 3])])) << 16;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 0])])) << 28;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i * 8 + 1])])) << 24;
 #endif
 		out[i] = temp;
 	}

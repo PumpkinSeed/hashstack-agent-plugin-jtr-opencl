@@ -169,12 +169,12 @@ static void init(struct fmt_main *self)
 #else
 	saved_key = mem_calloc(1, PLAINTEXT_LENGTH * 2 + 1 + SALT_SIZE);
 #endif
-	if (pers_opts.target_enc == UTF_8) {
+	if (options.target_enc == UTF_8) {
 		self->methods.set_key = set_key_utf8;
 		self->params.plaintext_length = MIN(125, PLAINTEXT_LENGTH * 3);
 	}
-	else if (pers_opts.target_enc != ISO_8859_1 &&
-	         pers_opts.target_enc != ASCII) {
+	else if (options.target_enc != ISO_8859_1 &&
+	         options.target_enc != ASCII) {
 		self->methods.set_key = set_key_CP;
 	}
 }
@@ -213,7 +213,7 @@ static void set_key(char *_key, int index)
 		keybuf_word += SIMD_COEF_32;
 	}
 	keybuf_word += SIMD_COEF_32;
-	*keybuf_word = (0x80 << 24);
+	*keybuf_word = (0x80U << 24);
 
 key_cleaning:
 	keybuf_word += SIMD_COEF_32;
@@ -266,7 +266,7 @@ static void set_key_CP(char *_key, int index)
 		keybuf_word += SIMD_COEF_32;
 	}
 	keybuf_word += SIMD_COEF_32;
-	*keybuf_word = (0x80 << 24);
+	*keybuf_word = (0x80U << 24);
 
 key_cleaning_enc:
 	keybuf_word += SIMD_COEF_32;
@@ -394,7 +394,7 @@ static void set_key_utf8(char *_key, int index)
 	if (chh != 0xffff || len == SALT_SIZE >> 1) {
 		*keybuf_word = 0xffffffff;
 		keybuf_word += SIMD_COEF_32;
-		*keybuf_word = (0x80 << 24);
+		*keybuf_word = (0x80U << 24);
 	} else {
 		*keybuf_word = 0xffff8000;
 	}

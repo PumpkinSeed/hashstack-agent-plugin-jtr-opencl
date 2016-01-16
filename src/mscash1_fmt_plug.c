@@ -136,7 +136,7 @@ static void init(struct fmt_main *self)
 
 	new_key=1;
 
-	if (pers_opts.target_enc == UTF_8) {
+	if (options.target_enc == UTF_8) {
 		fmt_mscash.methods.set_key = set_key_utf8;
 		fmt_mscash.methods.salt = get_salt_utf8;
 		fmt_mscash.params.plaintext_length = (PLAINTEXT_LENGTH * 3);
@@ -144,7 +144,7 @@ static void init(struct fmt_main *self)
 		tests[1].plaintext = "\xC3\xBC";         // German u-umlaut in UTF-8
 		tests[2].ciphertext = "M$user#9121790702dda0fa5d353014c334c2ce";
 		tests[2].plaintext = "\xe2\x82\xac\xe2\x82\xac"; // 2 x Euro signs
-	} else if (pers_opts.target_enc == ASCII || pers_opts.target_enc == ISO_8859_1) {
+	} else if (options.target_enc == ASCII || options.target_enc == ISO_8859_1) {
 		tests[1].ciphertext = "M$\xFC#48f84e6f73d6d5305f6558a33fa2c9bb";
 		tests[1].plaintext = "\xFC";         // German u-umlaut in UTF-8
 		tests[2].ciphertext = "M$\xFC\xFC#593246a8335cf0261799bda2a2a9c623";
@@ -375,17 +375,17 @@ static void *get_binary(char *ciphertext)
 
 	for(; i<4 ;i++)
 	{
-		temp  = (atoi16[ARCH_INDEX(ciphertext[i*8+0])])<<4;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+1])]);
+		temp  = ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+0])]))<<4;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+1])]));
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+2])])<<12;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+3])])<<8;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+2])]))<<12;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+3])]))<<8;
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+4])])<<20;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+5])])<<16;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+4])]))<<20;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+5])]))<<16;
 
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+6])])<<28;
-		temp |= (atoi16[ARCH_INDEX(ciphertext[i*8+7])])<<24;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+6])]))<<28;
+		temp |= ((unsigned int)(atoi16[ARCH_INDEX(ciphertext[i*8+7])]))<<24;
 
 		out[i]=temp;
 	}

@@ -109,12 +109,6 @@ john_clCreateBuffer(int l, char *f, cl_context context, cl_mem_flags flags,
 #endif
 
 typedef struct {
-	cl_platform_id platform;
-	int num_devices;
-} cl_platform;
-cl_platform platforms[MAX_PLATFORMS];
-
-typedef struct {
 	int device_info;
 	int cores_per_MP;
 	hw_bus pci_info;
@@ -136,6 +130,7 @@ extern size_t local_work_size;
 extern size_t global_work_size;
 extern size_t max_group_size;
 extern unsigned int ocl_v_width;
+extern unsigned long long global_speed;
 
 extern cl_event *profilingEvent, *firstEvent, *lastEvent;
 extern cl_event *multi_profilingEvent[MAX_EVENTS];
@@ -146,6 +141,18 @@ extern int device_info[MAX_GPU_DEVICES];
 #define GWS_CONFIG_NAME         "_GWS"
 #define DUR_CONFIG_NAME         "_MaxDuration"
 #define FALSE               0
+
+#define get_power_of_two(v)                     \
+{                                               \
+    v--;                                        \
+    v |= v >> 1;                                \
+    v |= v >> 2;                                \
+    v |= v >> 4;                                \
+    v |= v >> 8;                                \
+    v |= v >> 16;                               \
+    v |= (v >> 16) >> 16;                       \
+    v++;                                        \
+}
 
 size_t opencl_read_source(char *kernel_filename, char **kernel_source);
 
@@ -230,13 +237,13 @@ void opencl_process_event(void);
 
 /* Use this macro for OpenCL Error handling in crypt_all() */
 #define BENCH_CLERROR(cl_error, message)	  \
-	do { \
-		if ((cl_error) != CL_SUCCESS) { \
+	do { cl_int __err = (cl_error); \
+		if (__err != CL_SUCCESS) { \
 			if (!ocl_autotune_running || options.verbosity > 4) \
 				fprintf(stderr, "OpenCL %s error in %s:%d - %s\n", \
-			        get_error_name(cl_error), __FILE__, __LINE__, message); \
+			        get_error_name(__err), __FILE__, __LINE__, message); \
 			else if (options.verbosity == 4) \
-				fprintf(stderr, " %s\n", get_error_name(cl_error)); \
+				fprintf(stderr, " %s\n", get_error_name(__err)); \
 			if (!ocl_autotune_running) \
 				error(); \
 			else \
@@ -246,11 +253,20 @@ void opencl_process_event(void);
 
 /* Use this macro for OpenCL Error handling anywhere else */
 #define HANDLE_CLERROR(cl_error, message)	  \
-	do { \
-		if (cl_error != CL_SUCCESS) { \
+	do { cl_int __err = (cl_error); \
+		if (__err != CL_SUCCESS) { \
 			fprintf(stderr, "OpenCL %s error in %s:%d - %s\n", \
-			    get_error_name(cl_error), __FILE__, __LINE__, message); \
+			    get_error_name(__err), __FILE__, __LINE__, (message)); \
 			error(); \
+		} \
+	} while (0)
+
+/* Non-fatal alternative */
+#define SOFT_CLERROR(cl_error, message)	  \
+	do { cl_int __err = (cl_error); \
+		if (__err != CL_SUCCESS) { \
+			fprintf(stderr, "OpenCL %s error in %s:%d - %s\n", \
+			    get_error_name(__err), __FILE__, __LINE__, (message)); \
 		} \
 	} while (0)
 
@@ -331,7 +347,8 @@ void opencl_init_auto_setup(int p_default_value, int p_hash_loops,
                             int *p_split_events, const char **p_warnings,
                             int p_main_opencl_event, struct fmt_main *p_self,
                             void (*p_create_clobj)(size_t gws, struct fmt_main *self),
-                            void (*p_release_clobj)(void), int p_buffer_size, size_t p_gws_limit);
+                            void (*p_release_clobj)(void), int p_buffer_size, size_t p_gws_limit,
+                            struct db_main *db);
 
 /*
  * Shared function to get the OpenCL driver number.
