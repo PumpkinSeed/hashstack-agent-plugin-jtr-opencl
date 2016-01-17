@@ -319,12 +319,6 @@
             "tasksize": 899160
         }, 
         {
-            "algorithm": "PKZIP", 
-            "device": "cpu", 
-            "mode": "PKZIP", 
-            "tasksize": 603000000
-        }, 
-        {
             "algorithm": "Post.Office", 
             "device": "cpu", 
             "mode": "po", 
@@ -445,10 +439,10 @@
             "tasksize": 5320320
         }, 
         {
-            "algorithm": "ZIP", 
-            "device": "gpu", 
-            "mode": "zip-opencl", 
-            "tasksize": 37900320
+            "algorithm": "ZIP",
+            "device": "cpu",
+            "mode": "PKZIP",
+            "tasksize": 603000000
         }
     ], 
     "attacks": [
