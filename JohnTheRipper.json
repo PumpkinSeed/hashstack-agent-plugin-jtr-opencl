@@ -456,7 +456,7 @@
         }, 
         {
             "attack": "mask", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin -a 3 --stdout -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "rules", 

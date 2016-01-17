@@ -1,3 +1,9 @@
+hashstack-agent-plugin-jtr-opencl (1.8.0.4479-jumbo-1-g1a52a3b-3sagitta1) trusty; urgency=medium
+
+  * wtf... has -a 3 been missing FOR TWO YEARS!?
+
+ -- Jeremi Gosney <jgosney@sagitta.pw>  Sun, 17 Jan 2016 02:01:15 -0800
+
 hashstack-agent-plugin-jtr-opencl (1.8.0.4479-jumbo-1-g1a52a3b-2sagitta1) trusty; urgency=medium
 
   * zip/pkzip confusion
