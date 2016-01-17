@@ -454,27 +454,27 @@
     "attacks": [
         {
             "attack": "dictionary", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --fork=%forks% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "combinator", 
-            "command": "/opt/hashstack/programs/utils/combinator.bin -s %skip% -l %limit% %left_wordlist% %right_wordlist% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --fork=%forks% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/utils/combinator.bin -s %skip% -l %limit% %left_wordlist% %right_wordlist% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "mask", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --fork=%forks% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "rules", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% -r %rules% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --fork=%forks% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% -r %rules% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "hybridLeft", 
-            "command": "/opt/hashstack/programs/utils/hybrid_6.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %wordlist% %mask% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --fork=%forks% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/utils/hybrid_6.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %wordlist% %mask% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "hybridRight", 
-            "command": "/opt/hashstack/programs/utils/hybrid_7.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --pipe --session=%id% --fork=%forks% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/utils/hybrid_7.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% %wordlist% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }
     ], 
     "is_oclHashcat": false

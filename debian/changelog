@@ -1,3 +1,10 @@
+hashstack-agent-plugin-jtr-opencl (1.8.0.4479-jumbo-1-g1a52a3b-1sagitta1) trusty; urgency=medium
+
+  * hey, so, apparently we have to use MPI, because jtr doesn't allow you to
+    use -fork with -pipe/-stdin. so, that's cool.
+
+ -- Jeremi Gosney <jgosney@sagitta.pw>  Sun, 17 Jan 2016 00:21:57 -0800
+
 hashstack-agent-plugin-jtr-opencl (1.8.0.4479-jumbo-1-g1a52a3b-0sagitta1) trusty; urgency=medium
 
   * ugh.
