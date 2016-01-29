@@ -1,12 +1,6 @@
 {
     "algorithms": [
         {
-            "algorithm": "7zip", 
-            "device": "gpu", 
-            "mode": "7z-opencl", 
-            "tasksize": 163800
-        }, 
-        {
             "algorithm": "Kerberos AFS", 
             "device": "cpu", 
             "mode": "AFS", 
@@ -23,12 +17,6 @@
             "device": "cpu", 
             "mode": "blackberry-es10", 
             "tasksize": 2339280
-        }, 
-        {
-            "algorithm": "Blockchain.info Wallet", 
-            "device": "gpu", 
-            "mode": "blockchain-opencl", 
-            "tasksize": 48395760
         }, 
         {
             "algorithm": "BSDi", 
@@ -71,12 +59,6 @@
             "device": "gpu", 
             "mode": "dmg-opencl", 
             "tasksize": 21254880
-        }, 
-        {
-            "algorithm": "eCryptfs", 
-            "device": "cpu", 
-            "mode": "eCryptfs", 
-            "tasksize": 3600
         }, 
         {
             "algorithm": "Microsoft EFS", 
@@ -295,24 +277,6 @@
             "tasksize": 51890280
         }, 
         {
-            "algorithm": "PBKDF2-HMAC-SHA1", 
-            "device": "gpu", 
-            "mode": "PBKDF2-HMAC-SHA1-opencl", 
-            "tasksize": 188640000
-        }, 
-        {
-            "algorithm": "Apple iOS 7+ .plist", 
-            "device": "gpu", 
-            "mode": "PBKDF2-HMAC-SHA1-opencl", 
-            "tasksize": 188640000
-        }, 
-        {
-            "algorithm": "PBKDF2-HMAC-SHA512", 
-            "device": "gpu", 
-            "mode": "pbkdf2-hmac-sha512-opencl", 
-            "tasksize": 869880
-        }, 
-        {
             "algorithm": "PFX, PKCS12 (.pfx, .p12)", 
             "device": "cpu", 
             "mode": "PFX", 
@@ -335,12 +299,6 @@
             "device": "cpu", 
             "mode": "PuTTY", 
             "tasksize": 14505240
-        }, 
-        {
-            "algorithm": "RAR 3.x", 
-            "device": "gpu", 
-            "mode": "rar-opencl", 
-            "tasksize": 1652160
         }, 
         {
             "algorithm": "RAR 5.x", 
@@ -409,18 +367,6 @@
             "tasksize": 389760000
         }, 
         {
-            "algorithm": "TrueCrypt 5.0+ AES-XTS-PBKDF2-HMAC-RipeMD160", 
-            "device": "cpu", 
-            "mode": "tc_aes_xts", 
-            "tasksize": 115680
-        }, 
-        {
-            "algorithm": "TrueCrypt 5.0+ AES-XTS-PBKDF2-HMAC-Whirlpool", 
-            "device": "cpu", 
-            "mode": "tc_aes_xts", 
-            "tasksize": 115680
-        }, 
-        {
             "algorithm": "Trip Code", 
             "device": "cpu", 
             "mode": "tripcode", 
@@ -448,27 +394,27 @@
     "attacks": [
         {
             "attack": "dictionary", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "combinator", 
-            "command": "/opt/hashstack/programs/utils/combinator.bin -s %skip% -l %limit% %left_wordlist% %right_wordlist% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/utils/combinator.bin -s %skip% -l %limit% %left_wordlist% %right_wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "mask", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin -a 3 --stdout -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin -a 3 --stdout -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "rules", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% -r %rules% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% -r %rules% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "hybridLeft", 
-            "command": "/opt/hashstack/programs/utils/hybrid_6.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %wordlist% %mask% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/utils/hybrid_6.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %wordlist% %mask% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "hybridRight", 
-            "command": "/opt/hashstack/programs/utils/hybrid_7.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% %wordlist% | mpirun.openmpi -mca btl ^openib -np %forks% /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/utils/hybrid_7.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }
     ], 
     "is_oclHashcat": false

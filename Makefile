@@ -1,7 +1,7 @@
 
 all:
 	cd src && \
-	./configure --enable-mpi --disable-cuda --disable-pcap --disable-openmp && \
+	./configure --disable-cuda --disable-pcap && \
 	make -j
 	find run/ -type l -exec rm -vf '{}' \;
 	find run/ -type f -executable ! -name john -exec rm -vf '{}' \;

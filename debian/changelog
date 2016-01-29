@@ -1,3 +1,11 @@
+hashstack-agent-plugin-jtr-opencl (1.8.0.4479-jumbo-1-g1a52a3b-5sagitta1) trusty; urgency=medium
+
+  * move some algorithms to oclHashcat
+  * we lose multi-gpu support & only have multi-core support for OMP
+    algorithms. doesn't matter, we're getting rid of jtr soon anyway.
+
+ -- Jeremi Gosney <jgosney@sagitta.pw>  Wed, 27 Jan 2016 00:40:58 -0800
+
 hashstack-agent-plugin-jtr-opencl (1.8.0.4479-jumbo-1-g1a52a3b-3sagitta1) trusty; urgency=medium
 
   * wtf... has -a 3 been missing FOR TWO YEARS!?
