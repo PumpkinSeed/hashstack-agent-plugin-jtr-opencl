@@ -727,6 +727,10 @@ void opencl_preinit(void)
 			default_gpu_selected = 1;
 		}
 
+		if (get_number_of_available_devices() == 0) {
+			fprintf(stderr, "No OpenCL devices found\n");
+			error();
+		}
 		build_device_list(device_list);
 
 		if (get_number_of_devices_in_use() == 0) {
@@ -1208,6 +1212,7 @@ static cl_ulong gws_test(size_t gws, unsigned int rounds, int sequential_id)
 	if (!self->params.tests[0].fields[1])
 		self->params.tests[0].fields[1] = self->params.tests[0].ciphertext;
 	ciphertext = self->methods.prepare(self->params.tests[0].fields, self);
+	ciphertext = self->methods.split(ciphertext, 0, self);
 	salt = self->methods.salt(ciphertext);
 	if (salt)
 		dyna_salt_create(salt);
@@ -1420,6 +1425,7 @@ void opencl_find_best_lws(size_t group_size_limit, int sequential_id,
 	if (!self->params.tests[0].fields[1])
 		self->params.tests[0].fields[1] = self->params.tests[0].ciphertext;
 	ciphertext = self->methods.prepare(self->params.tests[0].fields, self);
+	ciphertext = self->methods.split(ciphertext, 0, self);
 	salt = self->methods.salt(ciphertext);
 	if (salt)
 		dyna_salt_create(salt);
@@ -1575,6 +1581,51 @@ static char *human_speed(unsigned long long int speed)
 	return out;
 }
 
+uint32_t get_bitmap_size_bits(uint32_t num_elements, int sequential_id)
+{
+	uint32_t size, elements = num_elements;
+	//On super: 128MB , 1GB, 2GB
+	cl_ulong memory_available = get_max_mem_alloc_size(sequential_id);
+
+	get_power_of_two(elements);
+
+	size = (elements * 8);
+
+	if (num_elements < (16))
+		size = (16 * 1024 * 8); //Cache?
+	else if (num_elements < (128))
+		size = (1024 * 1024 * 8 * 16);
+	else if (num_elements < (16 * 1024))
+		size *= 1024 * 4;
+	else
+		size *= 256;
+
+	if (size > memory_available) {
+		size = memory_available;
+		get_power_of_two(size);
+
+	}
+	if (!size || size > INT_MAX)
+		size = (uint)INT_MAX + 1U;
+
+	return size;
+}
+
+unsigned int lcm(unsigned int x, unsigned int y)
+{
+	unsigned int tmp, a, b;
+
+	a = MAX(x, y);
+	b = MIN(x, y);
+
+	while (b) {
+		tmp = b;
+		b = a % b;
+		a = tmp;
+	}
+	return x / a * y;
+}
+
 void opencl_find_best_gws(int step, unsigned long long int max_run_time,
                           int sequential_id, unsigned int rounds, int have_lws)
 {
@@ -1583,11 +1634,11 @@ void opencl_find_best_gws(int step, unsigned long long int max_run_time,
 	unsigned long long speed, best_speed = 0, raw_speed;
 	cl_ulong run_time, min_time = CL_ULONG_MAX;
 	unsigned long long int save_duration_time = duration_time;
-	cl_uint core_count = get_max_compute_units(sequential_id);
+	cl_uint core_count = get_processors_count(sequential_id);
 
 	if (have_lws) {
 		if (core_count > 2)
-			optimal_gws *= core_count;
+			optimal_gws = lcm(core_count, optimal_gws);
 		default_value = optimal_gws;
 	} else {
 		soft_limit = local_work_size * core_count * 128;
@@ -1741,7 +1792,7 @@ static char* opencl_get_dev_info(int sequential_id)
 
 static int find_valid_opencl_device()
 {
-	int d, ret = 0, acc = 0;
+	int d, ret = 0, acc = 0, gpu_found = 0;
 	unsigned int speed, best_1 = 0, best_2 = 0;
 	int num_devices = get_number_of_available_devices();
 
@@ -1754,6 +1805,7 @@ static int find_valid_opencl_device()
 			speed = opencl_speed_index(d);
 
 			if ((device_info[d] & DEV_GPU) && (speed > best_1)) {
+				gpu_found = 1;
 				best_1 = speed;
 				ret = d;
 			} else if ((device_info[d] & DEV_ACCELERATOR) && (speed > best_2)) {
@@ -1763,7 +1815,7 @@ static int find_valid_opencl_device()
 		}
 	}
 
-	return ret ? ret : acc;
+	return gpu_found ? ret : acc;
 }
 
 size_t opencl_read_source(char *kernel_filename, char **kernel_source)
@@ -2059,6 +2111,8 @@ cl_uint get_processors_count(int sequential_id)
 			core_count *= (ocl_device_list[sequential_id].cores_per_MP = 192);
 		else if (major == 5)    // 5.x Maxwell
 			core_count *= (ocl_device_list[sequential_id].cores_per_MP = 128);
+		else if (major == 6)    // 6.x Pascal
+			core_count *= (ocl_device_list[sequential_id].cores_per_MP = 128);
 /*
  * Apple, VCL and some other environments don't expose get_compute_capability()
  * so we need this crap - which is incomplete.
@@ -2068,6 +2122,9 @@ cl_uint get_processors_count(int sequential_id)
  * often show a better guess, even under OSX.
  */
 
+		// Pascal
+		else if (strstr(dname, "GTX 10"))
+			core_count *= (ocl_device_list[sequential_id].cores_per_MP = 128);
 		// Maxwell
 		else if (strstr(dname, "GTX 9") || strstr(dname, "GTX TITAN X"))
 			core_count *= (ocl_device_list[sequential_id].cores_per_MP = 128);
@@ -2369,7 +2426,7 @@ void opencl_list_devices(void)
 			cl_bool boolean;
 			char *p;
 			int ret, cpu;
-			int fan, temp, util;
+			int fan, temp, util, cl, ml;
 
 			if (!default_gpu_selected && !get_if_device_is_in_use(sequence_nr))
 				/* Nothing to do, skipping */
@@ -2535,21 +2592,31 @@ void opencl_list_devices(void)
 
 			long_entries = get_processors_count(sequence_nr);
 			if (!cpu && ocl_device_list[sequence_nr].cores_per_MP > 1)
-				printf("    Stream processors:      "LLu" "
+				printf("    %s      "LLu" "
 				       " (%d x %d)\n",
+					gpu_nvidia(device_info[sequence_nr]) ? "CUDA cores:       " : "Stream processors:",
 				       (unsigned long long)long_entries,
 				       entries, ocl_device_list[sequence_nr].cores_per_MP);
 			printf("    Speed index:            %u\n",
 			       opencl_speed_index(sequence_nr));
 
 			ret = clGetDeviceInfo(devices[sequence_nr],
-			                      CL_DEVICE_WAVEFRONT_WIDTH_AMD, sizeof(cl_uint), &long_entries, NULL);
+			                      CL_DEVICE_SIMD_WIDTH_AMD, sizeof(cl_uint),
+			                      &long_entries, NULL);
+			if (ret == CL_SUCCESS)
+				printf("    SIMD width:             "LLu"\n",
+				       (unsigned long long)long_entries);
+
+			ret = clGetDeviceInfo(devices[sequence_nr],
+			                      CL_DEVICE_WAVEFRONT_WIDTH_AMD,
+			                      sizeof(cl_uint), &long_entries, NULL);
 			if (ret == CL_SUCCESS)
 				printf("    Wavefront width:        "LLu"\n",
 				       (unsigned long long)long_entries);
 
 			ret = clGetDeviceInfo(devices[sequence_nr],
-			                      CL_DEVICE_WARP_SIZE_NV, sizeof(cl_uint), &long_entries, NULL);
+			                      CL_DEVICE_WARP_SIZE_NV, sizeof(cl_uint),
+			                      &long_entries, NULL);
 			if (ret == CL_SUCCESS)
 				printf("    Warp size:              "LLu"\n",
 				       (unsigned long long)long_entries);
@@ -2576,26 +2643,28 @@ void opencl_list_devices(void)
 				printf("    Kernel exec. timeout:   %s\n",
 				       boolean ? "yes" : "no");
 
-			if (ocl_device_list[sequence_nr].pci_info.busId[0]) {
-				printf("    PCI device topology:    %s\n",
-				       ocl_device_list[sequence_nr].pci_info.busId);
-			}
-			fan = temp = util = -1;
-#if __linux__ && HAVE_LIBDL
+			fan = temp = util = cl = ml = -1;
+#if HAVE_LIBDL
 			if (nvml_lib && gpu_nvidia(device_info[sequence_nr]) &&
 			    id2nvml(ocl_device_list[sequence_nr].pci_info) >= 0) {
 				printf("    NVML id:                %d\n",
 				       id2nvml(ocl_device_list[sequence_nr].pci_info));
 				nvidia_get_temp(id2nvml(ocl_device_list[sequence_nr].pci_info),
-				                &temp, &fan, &util);
+				                &temp, &fan, &util, &cl, &ml);
 			} else if (adl_lib && gpu_amd(device_info[sequence_nr])) {
 				printf("    ADL:                    Overdrive%d, device id %d\n",
 				       adl2od[id2adl(ocl_device_list[sequence_nr].pci_info)],
 				       id2adl(ocl_device_list[sequence_nr].pci_info));
 				amd_get_temp(id2adl(ocl_device_list[sequence_nr].pci_info),
-				             &temp, &fan, &util);
+				             &temp, &fan, &util, &cl, &ml);
 			}
 #endif
+			if (ocl_device_list[sequence_nr].pci_info.bus >= 0) {
+				printf("    PCI device topology:    %s\n",
+				       ocl_device_list[sequence_nr].pci_info.busId);
+			}
+			if (cl >= 0)
+				printf("    PCI lanes:              %d/%d\n", cl, ml);
 			if (fan >= 0)
 				printf("    Fan speed:              %u%%\n", fan);
 			if (temp >= 0)

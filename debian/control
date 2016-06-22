@@ -7,12 +7,10 @@ Build-Depends: build-essential, libopenmpi-dev, openmpi-bin, libssl-dev, libpcap
 
 Package: hashstack-agent-plugin-jtr-opencl
 Architecture: amd64
-Depends: openmpi-bin, libopenmpi-dev, hashstack-nvidia-driver | fglrx, libbz2-1.0, libc6 (>= 2.14), libgmp10, libssl1.0.0 (>= 1.0.0), zlib1g (>= 1:1.1.4)
-Recommends: hashstack-agent, hashstack-agent-plugin-hashcat-cli, hashstack-agent-utils, statsprocessor
-Conflicts: hashstack-agent-plugin-jtr, hashstack-agent-plugin-jtr-nogpu
+Depends: openmpi-bin, libopenmpi-dev, hashstack-amd-driver | hashstack-nvidia-driver, hashstack-agent-plugin-hashcat, libbz2-1.0, libc6 (>= 2.14), libgmp10, libssl1.0.0 (>= 1.0.0), zlib1g (>= 1:1.1.4)
+Recommends: hashstack-agent
 Replaces: hashstack-agent-plugin-jtr
-Provides: hashstack-agent-plugin-jtr
-Description: John the Ripper agent plugin for Hashstack with OpenCL & MPI support
- John the Ripper agent plugin for Hashstack with OpenCL & MPI support,
- based on bleeding jumbo through git commit g1a52a3b
+Breaks: hashstack-agent-plugin-jtr
+Description: John the Ripper agent plugin for Hashstack with OpenCL & OpenMP support
+ John the Ripper agent plugin for Hashstack with OpenCL & OpenMP support
 

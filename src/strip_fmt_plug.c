@@ -104,6 +104,9 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	char *p;
 	if (strncmp(ciphertext, "$strip$*", 8))
 		return 0;
+	/* handle 'chopped' .pot lines */
+	if (ldr_isa_pot_source(ciphertext))
+		return 1;
 	ctcopy = strdup(ciphertext);
 	keeptr = ctcopy;
 	ctcopy += 7+1;	/* skip over "$strip$" and first '*' */
@@ -209,11 +212,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		pbkdf2_sha1((unsigned char *)saved_key[index],
 		       strlen(saved_key[index]), cur_salt->salt,
 		       16, ITERATIONS, master[0], 32, 0);
-#if !ARCH_LITTLE_ENDIAN
-		for (i = 0; i < 32/sizeof(ARCH_WORD_32); ++i) {
-			((ARCH_WORD_32*)master[0])[i] = JOHNSWAP(((ARCH_WORD_32*)master[0])[i]);
-		}
-#endif
 #endif
 		for (i = 0; i < MAX_KEYS_PER_CRYPT; ++i) {
 			memcpy(output, SQLITE_FILE_HEADER, FILE_HEADER_SZ);

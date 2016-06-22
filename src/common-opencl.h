@@ -91,6 +91,10 @@ typedef union {
 #define CL_DEVICE_BOARD_NAME_AMD                    0x4038
 #endif
 
+#ifndef CL_DEVICE_SIMD_WIDTH_AMD
+#define CL_DEVICE_SIMD_WIDTH_AMD                    0x4041
+#endif
+
 #ifndef CL_DEVICE_WAVEFRONT_WIDTH_AMD
 #define CL_DEVICE_WAVEFRONT_WIDTH_AMD               0x4043
 #endif
@@ -141,18 +145,6 @@ extern int device_info[MAX_GPU_DEVICES];
 #define GWS_CONFIG_NAME         "_GWS"
 #define DUR_CONFIG_NAME         "_MaxDuration"
 #define FALSE               0
-
-#define get_power_of_two(v)                     \
-{                                               \
-    v--;                                        \
-    v |= v >> 1;                                \
-    v |= v >> 2;                                \
-    v |= v >> 4;                                \
-    v |= v >> 8;                                \
-    v |= v >> 16;                               \
-    v |= (v >> 16) >> 16;                       \
-    v++;                                        \
-}
 
 size_t opencl_read_source(char *kernel_filename, char **kernel_source);
 
@@ -365,4 +357,9 @@ void opencl_driver_value(int sequential_id, int *major, int *minor);
  * vector width for 'int' otherwise.
  */
 unsigned int opencl_speed_index(int sequential_id);
+
+/*
+ * Calculates the size of the bitmap used by the Bloom Filter buffer.
+ */
+uint32_t get_bitmap_size_bits(uint32_t num_elements, int sequential_id);
 #endif

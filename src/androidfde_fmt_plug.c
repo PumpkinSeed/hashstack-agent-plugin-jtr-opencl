@@ -135,6 +135,9 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	if (strncmp(ciphertext, FORMAT_TAG, TAG_LENGTH) != 0)
 		return 0;
 
+	/* handle 'chopped' .pot lines */
+	if (ldr_isa_pot_source(ciphertext))
+		return 1;
 	ctcopy = strdup(ciphertext);
 	keeptr = ctcopy;
 	ctcopy += TAG_LENGTH;
@@ -266,15 +269,6 @@ void hash_plugin_check_hash(int index)
 	pbkdf2_sha1((const uint8_t*)password, strlen(password), (const uint8_t*)(cur_salt->salt),
 		16, 2000, keycandidate, cur_salt->keysize + 16, 0);
 #endif
-#if !ARCH_LITTLE_ENDIAN
-	{
-		int i;
-		for (i = 0; i < (cur_salt->keysize + 16)/sizeof(ARCH_WORD_32); ++i) {
-			((ARCH_WORD_32*)keycandidate)[i] = JOHNSWAP(((ARCH_WORD_32*)keycandidate)[i]);
-		}
-	}
-#endif
-
 	j = 0;
 #ifdef SIMD_COEF_32
 	for (; j < SSE_GROUP_SZ_SHA1; ++j) {

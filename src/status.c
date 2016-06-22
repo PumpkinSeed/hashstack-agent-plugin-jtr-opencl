@@ -65,6 +65,7 @@ static clock_t get_time(void)
 void status_init(double (*get_progress)(void), int start)
 {
 	if (start) {
+		status.resume_salt = 0;
 		if (!status_restored_time)
 			memset(&status, 0, sizeof(status));
 		status.start_time = get_time();
@@ -435,11 +436,11 @@ void status_print(void)
 			int dev = gpu_device_list[i];
 
 			if (dev_get_temp[dev]) {
-				int fan, temp, util;
+				int fan, temp, util, cl, ml;
 
-				fan = temp = util = -1;
+				fan = temp = util = cl = ml = -1;
 				dev_get_temp[dev](temp_dev_id[dev],
-				                  &temp, &fan, &util);
+				                  &temp, &fan, &util, &cl, &ml);
 				if (temp >= 0 &&
 				    (options.verbosity > VERB_DEFAULT ||
 				    cfg_get_bool(SECTION_OPTIONS,

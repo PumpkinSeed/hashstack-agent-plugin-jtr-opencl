@@ -1,3 +1,11 @@
+hashstack-agent-plugin-jtr-opencl (1.8.0.8888-jumbo-1-56a5040-0sagitta1) trusty; urgency=medium
+
+  * use hashcat instead of hashcat-cli
+  * remove more algorithms that we don't really care about
+  * this plugin still sucks since jtr doesn't support stdin with fork
+
+ -- Jeremi Gosney <jgosney@sagitta.pw>  Wed, 22 Jun 2016 05:08:33 -0700
+
 hashstack-agent-plugin-jtr-opencl (1.8.0.4479-jumbo-1-g1a52a3b-5sagitta1) trusty; urgency=medium
 
   * move some algorithms to oclHashcat

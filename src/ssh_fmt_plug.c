@@ -245,8 +245,7 @@ static void *get_salt(char *ciphertext)
 	EVP_PKEY pk;
 	long len;
 
-	psalt = (struct custom_salt*)mem_calloc(1, sizeof(struct custom_salt));
-	memset(psalt, 0, sizeof(struct custom_salt));
+	psalt = (struct custom_salt*)mem_calloc(sizeof(struct custom_salt), 1);
 	pk.type = 0;
 	pk.save_type = 0;
 
@@ -328,7 +327,7 @@ static void *get_salt(char *ciphertext)
 		OPENSSL_free(data);
 	}
 
-	psalt->dsalt.salt_alloc_needs_free = 1;  // we used mem_calloc, so JtR CAN free our pointer when done with them.
+	psalt->dsalt.salt_alloc_needs_free = 1;
 	// NOTE, we need some way to close the BIO and EVP crap!!
 
 	// set the JtR core linkage stuff for this dyna_salt
@@ -353,6 +352,9 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	int length;
 	if (strncmp(ciphertext, "$ssh2$", 6))
 		return 0;
+	/* handle 'chopped' .pot lines */
+	if (ldr_isa_pot_source(ciphertext))
+		return 1;
 	ctcopy = strdup(ciphertext);
 	keeptr = ctcopy;
 	ctcopy += 6;

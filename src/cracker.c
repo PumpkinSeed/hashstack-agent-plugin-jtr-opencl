@@ -29,9 +29,15 @@
 #endif
 
 #include "arch.h"
+#include "params.h"
+#include "base64_convert.h"
+
+#if CRK_PREFETCH && defined(__SSE__)
+#include <xmmintrin.h>
+#endif
+
 #include "misc.h"
 #include "math.h"
-#include "params.h"
 #include "memory.h"
 #include "signals.h"
 #include "idle.h"
@@ -48,6 +54,7 @@
 #include "unicode.h"
 #include "john.h"
 #include "fake_salts.h"
+#include "sha.h"
 #ifdef HAVE_MPI
 #include "john-mpi.h"
 #endif
@@ -55,9 +62,6 @@
 #include "jumbo.h"
 #if HAVE_LIBDL && defined(HAVE_CUDA) || defined(HAVE_OPENCL)
 #include "common-gpu.h"
-#endif
-#if CRK_PREFETCH && defined(__SSE2__)
-#include <emmintrin.h>
 #endif
 #include "memdbg.h"
 
@@ -383,10 +387,26 @@ static int crk_process_guess(struct db_salt *salt, struct db_password *pw,
 
 	/* If we got this crack from a pot sync, don't report or count */
 	if (index >= 0) {
+		const char *ct;
+		char buffer[LINE_BUFFER_SIZE + 1];
+
+		if (options.max_run_time < 0) {
+#if OS_TIMER
+			timer_abort = 0 - options.max_run_time;
+#else
+			timer_abort = status_get_time() - options.max_run_time;
+#endif
+		}
+
+		if (dupe)
+			ct = NULL;
+		else
+			ct = ldr_pot_source(
+				crk_methods.source(pw->source, pw->binary),
+				buffer);
 		log_guess(crk_db->options->flags & DB_LOGIN ? replogin : "?",
 		          crk_db->options->flags & DB_LOGIN ? repuid : "",
-		          dupe ?
-		          NULL : crk_methods.source(pw->source, pw->binary),
+		          (char*)ct,
 		          repkey, key, crk_db->options->field_sep_char, index);
 
 		if (options.flags & FLG_CRKSTAT)
@@ -417,6 +437,7 @@ static int crk_process_guess(struct db_salt *salt, struct db_password *pw,
 static char *crk_loaded_counts(void)
 {
 	static char s_loaded_counts[80];
+	char nbuf[24];
 
 	if (crk_db->password_count == 0)
 		return "No remaining hashes";
@@ -425,11 +446,10 @@ static char *crk_loaded_counts(void)
 		return "Remaining 1 hash";
 
 	sprintf(s_loaded_counts,
-		crk_db->salt_count > 1 ?
-		"Remaining %d hashes with %d different salts" :
-		"Remaining %d hashes with no different salts",
+		"Remaining %d hashes with %s different salts",
 		crk_db->password_count,
-		crk_db->salt_count);
+		crk_db->salt_count > 1 ?
+		jtr_itoa(crk_db->salt_count, nbuf, 24, 10) : "no");
 
 	return s_loaded_counts;
 }
@@ -447,12 +467,43 @@ static int crk_remove_pot_entry(char *ciphertext)
 #endif
 
 	/*
+	 * If the pot entry is truncated from a huge ciphertext, we have
+	 * this alternate code path that's slower but aware of the magic.
+	 */
+	if (ldr_isa_pot_source(ciphertext)) {
+		if ((salt = crk_db->salts))
+		do {
+			if ((pw = salt->list))
+			do {
+				char *source;
+
+				source = crk_methods.source(pw->source,
+				                            pw->binary);
+
+				if (!ldr_pot_source_cmp(ciphertext, source)) {
+					if (crk_process_guess(salt, pw, -1))
+						return 1;
+
+					if (!(crk_db->options->flags & DB_WORDS))
+						break;
+				}
+			} while ((pw = pw->next));
+		}  while ((salt = salt->next));
+
+#ifdef POTSYNC_DEBUG
+		end = times(&buffer);
+		salt_time += (end - start);
+#endif
+		return 0;
+	}
+
+	/*
 	 * We need to copy ciphertext, because the one we got actually
 	 * points to a static buffer in split() and we are going to call
 	 * that function again and compare the results. Thanks to
 	 * Christien Rioux for pointing this out.
 	 */
-	ciphertext = strncpy(argcopy, ciphertext, sizeof(argcopy));
+	ciphertext = strnzcpy(argcopy, ciphertext, sizeof(argcopy));
 	pot_salt = crk_methods.salt(ciphertext);
 	dyna_salt_create(pot_salt);
 
@@ -709,6 +760,7 @@ static int crk_process_event(void)
 
 static int crk_password_loop(struct db_salt *salt)
 {
+	void ext_hybrid_fix_state(void);
 	int count;
 	unsigned int match, index;
 #if CRK_PREFETCH
@@ -723,6 +775,8 @@ static int crk_password_loop(struct db_salt *salt)
 
 	if (event_pending && crk_process_event())
 		return -1;
+
+	ext_hybrid_fix_state();
 
 	count = crk_key_index;
 	match = crk_methods.crypt_all(&count, salt);
@@ -775,7 +829,7 @@ static int crk_password_loop(struct db_salt *salt)
 			unsigned int *b = &salt->bitmap[h / (sizeof(*salt->bitmap) * 8)];
 			a[slot].i = h;
 			a[slot].u.b = b;
-#ifdef __SSE2__
+#ifdef __SSE__
 			_mm_prefetch((const char *)b, _MM_HINT_NTA);
 #else
 			*(volatile unsigned int *)b;
@@ -786,7 +840,7 @@ static int crk_password_loop(struct db_salt *salt)
 			unsigned int h = a[slot].i;
 			if (*a[slot].u.b & (1U << (h % (sizeof(*salt->bitmap) * 8)))) {
 				struct db_password **pwp = &salt->hash[h >> PASSWORD_HASH_SHR];
-#ifdef __SSE2__
+#ifdef __SSE__
 				_mm_prefetch((const char *)pwp, _MM_HINT_NTA);
 #else
 				*(void * volatile *)pwp;
@@ -803,9 +857,9 @@ static int crk_password_loop(struct db_salt *salt)
 /*
  * Chances are this will also prefetch the next_hash field and the actual
  * binary (pointed to by the binary field, but likely located right after
- * this struct.
+ * this struct).
  */
-#ifdef __SSE2__
+#ifdef __SSE__
 			_mm_prefetch((const char *)&pw->binary, _MM_HINT_NTA);
 #else
 			*(void * volatile *)&pw->binary;
@@ -870,11 +924,31 @@ static int crk_salt_loop(void)
 		return 1;
 
 	salt = crk_db->salts;
+
+	/* on first run, right after restore, this can be non-zero */
+	if (status.resume_salt) {
+		struct db_salt *s = salt;
+
+		status.resume_salt = 0;	/* only resume the first time */
+		while (s) {
+			if (s->salt_md5[0] == status.resume_salt_md5[0] &&
+			    !memcmp(s->salt_md5, status.resume_salt_md5, 16))
+			{
+				/* found it!! */
+				salt = s;
+				break;
+			}
+			s = s->next;
+		}
+	}
 	do {
 		crk_methods.set_salt(salt->salt);
+		status.resume_salt_md5 = salt->salt_md5;
 		if ((done = crk_password_loop(salt)))
 			break;
 	} while ((salt = salt->next));
+	if (!salt || salt->count < 2)
+		status.resume_salt_md5 = 0;
 
 	if (done >= 0) {
 #if !HAVE_OPENCL

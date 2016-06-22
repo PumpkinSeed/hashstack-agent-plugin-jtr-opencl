@@ -36,6 +36,7 @@
 #include <fcntl.h>
 #endif
 #include <errno.h>
+#include <time.h>
 #include <stdarg.h>
 #include <string.h>
 #include <signal.h>
@@ -62,6 +63,9 @@
 static int cfg_beep;
 static int cfg_log_passwords;
 static int cfg_showcand;
+static char *LogDateFormat;
+static char *LogDateStderrFormat;
+static int LogDateFormatUTC=0;
 
 /*
  * Note: the file buffer is allocated as (size + LINE_BUFFER_SIZE) bytes
@@ -99,7 +103,13 @@ static void log_file_init(struct log_file *f, char *name, int size)
 	    O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR)) < 0)
 		pexit("open: %s", path_expand(name));
 
-	f->ptr = f->buffer = mem_alloc(size + LINE_BUFFER_SIZE);
+	/*
+	 * plain will now always be < LINE_BUFFER_SIZE. We add some extra bytes
+	 * so that there is ALWAYS enough buffer to write our line, and we no
+	 * longer have to check length before a write (.pot or .log file).
+	 * The "64" comes from core.
+	 */
+	f->ptr = f->buffer = mem_alloc(size + LINE_BUFFER_SIZE + PLAINTEXT_BUFFER_SIZE + 64);
 	f->size = size;
 }
 
@@ -231,24 +241,43 @@ static void log_file_done(struct log_file *f, int do_sync)
 static int log_time(void)
 {
 	int count1, count2;
-	unsigned int time;
+	unsigned int Time;
 
 	count1 = 0;
+
+	Time = pot.fd >= 0 ? status_get_time() : status_restored_time;
+
+	if (LogDateFormat) {
+		struct tm *t_m;
+		char Buf[128];
+		time_t t;
+
+		t = time(0);
+		if (LogDateFormatUTC)
+			t_m = gmtime(&t);
+		else
+			t_m = localtime(&t);
+		strftime(Buf, sizeof(Buf), LogDateFormat, t_m);
+		count2 = (int)sprintf(log.ptr + count1, "%s ", Buf);
+		if (count2 < 0)
+			return count2;
+		count1 += count2;
+	}
+
 #ifndef HAVE_MPI
 	if (options.fork) {
 #else
 	if (options.fork || mpi_p > 1) {
 #endif
-		count1 = (int)sprintf(log.ptr, "%u ", options.node_min);
-		if (count1 < 0)
-			return count1;
+		count2 = (int)sprintf(log.ptr + count1, "%u ", options.node_min);
+		if (count2 < 0)
+			return count2;
+		count1 += count2;
 	}
 
-	time = pot.fd >= 0 ? status_get_time() : status_restored_time;
-
 	count2 = (int)sprintf(log.ptr + count1, "%u:%02u:%02u:%02u ",
-	    time / 86400, time % 86400 / 3600,
-	    time % 3600 / 60, time % 60);
+	    Time / 86400, Time % 86400 / 3600,
+	    Time % 3600 / 60, Time % 60);
 	if (count2 < 0)
 		return count2;
 
@@ -293,7 +322,12 @@ void log_init(char *log_name, char *pot_name, char *session)
 	                                 "LogCrackedPasswords", 0);
 	cfg_showcand = cfg_get_bool(SECTION_OPTIONS, NULL,
 	                            "StatusShowCandidates", 0);
-
+	LogDateFormat = cfg_get_param(SECTION_OPTIONS, NULL,
+			            "LogDateFormat");
+	LogDateFormatUTC = cfg_get_bool(SECTION_OPTIONS, NULL,
+	                            "LogDateFormatUTC", 0);
+	LogDateStderrFormat = cfg_get_param(SECTION_OPTIONS, NULL,
+			            "LogDateStderrFormat");
 	in_logger = 0;
 }
 
@@ -370,24 +404,21 @@ void log_guess(char *login, char *uid, char *ciphertext, char *rep_plain,
 		if (!strncmp(ciphertext, "$dynamic_", 9))
 			ciphertext = dynamic_FIX_SALT_TO_HEX(ciphertext);
 #endif
-		if (strlen(ciphertext) + strlen(store_plain) <= LINE_BUFFER_SIZE - 3) {
-			if (options.secure) {
-				secret = components(store_plain, len);
-				count1 = (int)sprintf(pot.ptr,
-				                      "%s%c%s\n",
-				                      ciphertext,
-				                      field_sep,
-				                      secret);
-			} else
-				count1 = (int)sprintf(pot.ptr,
-				                      "%s%c%s\n", ciphertext,
-				                      field_sep, store_plain);
-			if (count1 > 0) pot.ptr += count1;
-		}
+		if (options.secure) {
+			secret = components(store_plain, len);
+			count1 = (int)sprintf(pot.ptr,
+				                "%s%c%s\n",
+				                ciphertext,
+				                field_sep,
+				                secret);
+		} else
+			count1 = (int)sprintf(pot.ptr,
+				                "%s%c%s\n", ciphertext,
+				                field_sep, store_plain);
+		if (count1 > 0) pot.ptr += count1;
 	}
 
-	if (log.fd >= 0 &&
-	    strlen(login) < LINE_BUFFER_SIZE - 64) {
+	if (log.fd >= 0) {
 		count1 = log_time();
 		if (count1 > 0) {
 			log.ptr += count1;
@@ -435,7 +466,21 @@ void log_event(const char *format, ...)
 	int count1, count2;
 
 	if (options.flags & FLG_LOG_STDERR) {
-		unsigned int time;
+		unsigned int Time;
+
+		if (LogDateStderrFormat) {
+			struct tm *t_m;
+			char Buf[128];
+			time_t t;
+
+			t = time(0);
+			if (LogDateFormatUTC)
+				t_m = gmtime(&t);
+			else
+				t_m = localtime(&t);
+			strftime(Buf, sizeof(Buf), LogDateStderrFormat, t_m);
+			fprintf(stderr, "%s ", Buf);
+		}
 
 #ifndef HAVE_MPI
 		if (options.fork)
@@ -444,11 +489,11 @@ void log_event(const char *format, ...)
 #endif
 			fprintf(stderr, "%u ", options.node_min);
 
-		time = pot.fd >= 0 ? status_get_time() : status_restored_time;
+		Time = pot.fd >= 0 ? status_get_time() : status_restored_time;
 
 		fprintf(stderr, "%u:%02u:%02u:%02u ",
-		        time / 86400, time % 86400 / 3600,
-		        time % 3600 / 60, time % 60);
+		        Time / 86400, Time % 86400 / 3600,
+		        Time % 3600 / 60, Time % 60);
 
 		va_start(args, format);
 		vfprintf(stderr, format, args);

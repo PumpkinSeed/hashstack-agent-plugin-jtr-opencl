@@ -115,6 +115,9 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 	if (strncmp(ciphertext,  "$agilekeychain$", 15) != 0)
 		return 0;
+	/* handle 'chopped' .pot lines */
+	if (ldr_isa_pot_source(ciphertext))
+		return 1;
 	ctcopy = strdup(ciphertext);
 	keeptr = ctcopy;
 	ctcopy += 15;
@@ -256,14 +259,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		       strlen(saved_key[index]),
 		       cur_salt->salt[0], cur_salt->saltlen[0],
 		       cur_salt->iterations[0], master, 16, 0);
-#if !ARCH_LITTLE_ENDIAN
-		{
-			int i;
-			for (i = 0; i < 32/sizeof(ARCH_WORD_32); ++i) {
-				((ARCH_WORD_32*)master)[i] = JOHNSWAP(((ARCH_WORD_32*)master)[i]);
-			}
-		}
-#endif
 		if(akcdecrypt(master, cur_salt->ct[0]) == 0)
 			cracked[index] = 1;
 		else

@@ -306,11 +306,23 @@ static int restore_state(FILE *file)
 		if (mem_map) {
 			char line[LINE_BUFFER_SIZE];
 			skip_lines(rec_line, line);
+			rec_pos = 0;
+		} else if (rec_line && !rec_pos) {
+			/* from mem_map build does not have rec_pos */
+			int64_t i = rec_line;
+			char line[LINE_BUFFER_SIZE];
+			jtr_fseek64(word_file, 0, SEEK_SET);
+			while (i--)
+				if (!fgetl(line, sizeof(line), word_file))
+					pexit(STR_MACRO(jtr_fseek64));
+			rec_pos = jtr_ftell64(word_file);
 		} else
 		if (jtr_fseek64(word_file, rec_pos, SEEK_SET))
 			pexit(STR_MACRO(jtr_fseek64));
 		line_number = rec_line;
 	}
+	else
+		line_number = rec_line;
 
 	return 0;
 }
@@ -418,6 +430,18 @@ static double get_progress(void)
 static char *dummy_rules_apply(char *word, char *rule, int split, char *last)
 {
 	return word;
+}
+
+static MAYBE_INLINE void clean_bom(char *line)
+{
+	static int checkbomfirst = 1;
+
+	if (line_number == 0 && checkbomfirst && options.input_enc == UTF_8) {
+		if (!strncmp("\xEF\xBB\xBF", line, 3)) {
+			memmove(line, line + 3, strlen(line) - 2);
+		}
+		checkbomfirst = 0;
+	}
 }
 
 /*
@@ -958,6 +982,7 @@ GRAB_NEXT_PIPE_LOAD:
 						pipe_input = 0;
 						break;
 					}
+					cpi = convert(cpi);
 					if (strncmp(cpi, "#!comment", 9)) {
 						int len = strlen(cpi);
 						if (!rules) {
@@ -1193,6 +1218,17 @@ REDO_AFTER_LMLOOP:
 					wordlist_hybrid_fix_state();
 				} else
 #endif
+				if (f_new) {
+					if (do_external_hybrid_crack(db, word))
+					{
+						rule = NULL;
+						rules = 0;
+						pipe_input = 0;
+						do_lmloop = 0;
+						break;
+					}
+					wordlist_hybrid_fix_state();
+				} else
 				if (options.mask) {
 					if (do_mask_crack(word)) {
 						rule = NULL;
@@ -1231,6 +1267,8 @@ REDO_AFTER_LMLOOP:
 #else
 			strcpy(line, words[line_number]);
 #endif
+			clean_bom(line);
+
 			line_number++;
 
 			if ((word = apply(line, rule, -1, last))) {
@@ -1250,6 +1288,16 @@ REDO_AFTER_LMLOOP:
 					wordlist_hybrid_fix_state();
 				} else
 #endif
+				if (f_new) {
+					if (do_external_hybrid_crack(db, word))
+					{
+						rule = NULL;
+						rules = 0;
+						pipe_input = 0;
+						break;
+					}
+					wordlist_hybrid_fix_state();
+				} else
 				if (options.mask) {
 					if (do_mask_crack(word)) {
 						rule = NULL;
@@ -1270,6 +1318,9 @@ REDO_AFTER_LMLOOP:
 		else if (rule)
 		while (mem_map ? mgetl(line) :
 		       fgetl(line, LINE_BUFFER_SIZE, word_file)) {
+
+			clean_bom(line);
+
 			line_number++;
 
 			if (line[0] != '#') {
@@ -1314,6 +1365,16 @@ process_word:
 						wordlist_hybrid_fix_state();
 					} else
 #endif
+					if (f_new) {
+						if (do_external_hybrid_crack(db, word))
+						{
+							rule = NULL;
+							rules = 0;
+							pipe_input = 0;
+							break;
+						}
+						wordlist_hybrid_fix_state();
+					} else
 					if (options.mask) {
 						if (do_mask_crack(word)) {
 							rule = NULL;
@@ -1354,7 +1415,7 @@ next_rule:
 			if (!(rule = rpp_next(&ctx))) break;
 			rule_number++;
 
-			if (rule_number >= dist_switch) {
+			if (options.node_count && rule_number >= dist_switch) {
 				log_event("- Switching to distributing words");
 				dist_rules = 0;
 				dist_switch = rule_count; /* not anymore */

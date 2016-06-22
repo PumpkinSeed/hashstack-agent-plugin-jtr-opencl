@@ -377,7 +377,7 @@ char *benchmark_format(struct fmt_main *format, int salts,
 	}
 
 	for (index = 0; index < 2; index++) {
-		two_salts[index] = mem_alloc(format->params.salt_size);
+		two_salts[index] = mem_alloc_align(format->params.salt_size, format->params.salt_align);
 
 		if ((ciphertext = format->params.tests[index].ciphertext)) {
 			char **fields = format->params.tests[index].fields;
@@ -821,13 +821,13 @@ AGAIN:
 		for (i = 0; i < MAX_GPU_DEVICES &&
 			     gpu_device_list[i] != -1; i++) {
 			int dev = gpu_device_list[i];
-			int fan, temp, util;
+			int fan, temp, util, cl, ml;
 
-			fan = temp = util = -1;
+			fan = temp = util = cl = ml = -1;
 
 			if (dev_get_temp[dev])
 				dev_get_temp[dev](temp_dev_id[dev],
-				                  &temp, &fan, &util);
+				                  &temp, &fan, &util, &cl, &ml);
 #if 1
 			if (util <= 0)
 				continue;

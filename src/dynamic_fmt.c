@@ -151,6 +151,8 @@ static void dynamic_RESET(struct fmt_main *fmt);
 
 #define eLargeOut dyna_eLargeOut
 eLargeOut_t *eLargeOut;
+#define nLargeOff dyna_nLargeOff
+unsigned *nLargeOff;
 
 
 #if ARCH_LITTLE_ENDIAN
@@ -249,6 +251,7 @@ static int keys_dirty;
 static unsigned char *cursalt;
 // length of salt (so we don't have to call strlen() all the time.
 static int saltlen;
+int get_dynamic_fmt_saltlen() { return saltlen; }
 // This array is for the 2nd salt in the hash.  I know of no hashes with double salts,
 // but test type dynamic_16 (which is 'fake') has 2 salts, and this is the data/code to
 // handle double salts.
@@ -483,19 +486,38 @@ static int valid(char *ciphertext, struct fmt_main *pFmt)
 	if (pPriv->dynamic_FIXED_SALT_SIZE > 0 && ciphertext[pPriv->dynamic_SALT_OFFSET-1] != '$')
 		return 0;
 	if (pPriv->dynamic_FIXED_SALT_SIZE > 0 && strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]) != pPriv->dynamic_FIXED_SALT_SIZE) {
-		// check if there is a 'salt-2' or 'username', etc  If that is the case, then this is still valid.
-		if (strncmp(&ciphertext[pPriv->dynamic_SALT_OFFSET+pPriv->dynamic_FIXED_SALT_SIZE], "$$", 2))
-			return 0;
+		// first check to see if this salt has left the $HEX$ in the string (i.e. embedded nulls).  If so, then
+		// validate length with this in mind.
+		if (!memcmp(&ciphertext[pPriv->dynamic_SALT_OFFSET], "HEX$", 4)) {
+			int len = strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]);
+			len = (len-4)>>1;
+			if (len != pPriv->dynamic_FIXED_SALT_SIZE)
+				return 0;
+		} else {
+			// check if there is a 'salt-2' or 'username', etc  If that is the case, then this is still valid.
+			if (strncmp(&ciphertext[pPriv->dynamic_SALT_OFFSET+pPriv->dynamic_FIXED_SALT_SIZE], "$$", 2))
+				return 0;
+		}
 	}
 	else if (!regen_salts_options && pPriv->dynamic_FIXED_SALT_SIZE < -1 && strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]) > -(pPriv->dynamic_FIXED_SALT_SIZE)) {
-		// check if there is a 'salt-2' or 'username', etc  If that is the case, then this is still 'valid'
-		char *cpX = mem_alloc(-(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
-		strnzcpy(cpX, &ciphertext[pPriv->dynamic_SALT_OFFSET], -(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
-		if (!strstr(cpX, "$$")) {
+		char *cpX;
+		// first check to see if this salt has left the $HEX$ in the string (i.e. embedded nulls).  If so, then
+		// validate length with this in mind.
+		if (!memcmp(&ciphertext[pPriv->dynamic_SALT_OFFSET], "HEX$", 4)) {
+			int len = strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]);
+			len = (len-4)>>1;
+			if (len > -(pPriv->dynamic_FIXED_SALT_SIZE))
+				return 0;
+		} else {
+			// check if there is a 'salt-2' or 'username', etc  If that is the case, then this is still 'valid'
+			cpX = mem_alloc(-(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
+			strnzcpy(cpX, &ciphertext[pPriv->dynamic_SALT_OFFSET], -(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
+			if (!strstr(cpX, "$$")) {
+				MEM_FREE(cpX);
+				return 0;
+			}
 			MEM_FREE(cpX);
-			return 0;
 		}
-		MEM_FREE(cpX);
 	}
 	if (pPriv->b2Salts==1 && !strstr(&ciphertext[pPriv->dynamic_SALT_OFFSET-1], "$$2"))
 		return 0;
@@ -562,6 +584,15 @@ void __nonMP_eLargeOut(eLargeOut_t what)
 #endif
 	eLargeOut[0] = what;
 }
+void __nonMP_nLargeOff(unsigned val)
+{
+#ifdef _OPENMP
+	unsigned int i;
+	for (i = 1; i < m_ompt; ++i)
+		nLargeOff[i] = val;
+#endif
+	nLargeOff[0] = val;
+}
 
 static inline void md5_unicode_convert_set(int what, int tid)
 {
@@ -588,6 +619,8 @@ void __nonMP_md5_unicode_convert(int what)
 #define md5_unicode_convert_get(tid)       md5_unicode_convert_get(0)
 #define eLargeOut_set(what, tid)  eLargeOut_set(what, 0)
 #define eLargeOut_get(tid)        eLargeOut_get(0)
+#define nLargeOff_set(val, tid)   nLargeOff_set(val, 0)
+#define nLargeOff_get(tid)        nLargeOff_get(0)
 #endif
 
 static inline void __nonMP_DynamicFunc__append_keys2()
@@ -734,14 +767,19 @@ static void init(struct fmt_main *pFmt)
 	if (!md5_unicode_convert) {
 		md5_unicode_convert = (int*)mem_calloc(m_ompt, sizeof(int));
 		eLargeOut = (eLargeOut_t*)mem_calloc(m_ompt, sizeof(eLargeOut_t));
-		for (i = 0; i < m_ompt; ++i)
+		nLargeOff = (unsigned*)mem_calloc(m_ompt, sizeof(unsigned));
+		for (i = 0; i < m_ompt; ++i) {
 			eLargeOut[i] = eBase16;
+			nLargeOff[i] = 0;
+		}
 	}
 #else
 	if (!md5_unicode_convert) {
 		md5_unicode_convert = (int*)mem_calloc(1, sizeof(int));
 		eLargeOut = (eLargeOut_t*)mem_calloc(1, sizeof(eLargeOut_t));
 		eLargeOut[0] = eBase16;
+		nLargeOff = (unsigned*)mem_calloc(1, sizeof(unsigned));
+		nLargeOff[0] = 0;
 	}
 #endif
 #ifdef SIMD_COEF_32
@@ -788,7 +826,9 @@ static void init(struct fmt_main *pFmt)
 	force_md5_ctx = curdat.force_md5_ctx;
 
 	fmt_Dynamic.params.max_keys_per_crypt = pFmt->params.max_keys_per_crypt;
-	fmt_Dynamic.params.min_keys_per_crypt = pFmt->params.min_keys_per_crypt;
+	fmt_Dynamic.params.min_keys_per_crypt = pFmt->params.max_keys_per_crypt;
+	if (pFmt->params.min_keys_per_crypt > 64)
+		pFmt->params.min_keys_per_crypt = 64;
 	fmt_Dynamic.params.flags              = pFmt->params.flags;
 	fmt_Dynamic.params.format_name        = pFmt->params.format_name;
 	fmt_Dynamic.params.algorithm_name     = pFmt->params.algorithm_name;
@@ -862,6 +902,7 @@ static void done(void)
 	MEM_FREE(total_len);
 	MEM_FREE(input_buf);
 #endif
+	MEM_FREE(nLargeOff);
 	MEM_FREE(eLargeOut);
 	MEM_FREE(md5_unicode_convert);
 	for (i = 0; i < 4; ++i)
@@ -1513,6 +1554,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	// many keys are loaded, and how much work we do.
 	m_count = *pcount;
 	__nonMP_eLargeOut(eBase16);
+	__nonMP_nLargeOff(0);
 
 #ifdef SIMD_COEF_32
 	// If this format is MMX built, but is supposed to start in X86 (but be switchable), then we
@@ -2383,6 +2425,37 @@ static int salt_hash(void *salt)
 	return ( (H^(H>>9)) & (SALT_HASH_SIZE-1) );
 }
 
+static unsigned dynamic_this_salt_length(const void *v) {
+	const unsigned char *s = (unsigned char*)v;
+	unsigned l = *s++ - '0';
+	unsigned bits;
+	l <<= 3;
+	l += *s++ - '0';
+#if ARCH_ALLOWS_UNALIGNED
+	if (*((ARCH_WORD_32*)s) == 0x30303030)
+#else
+	if (!memcmp(s, "0000", 4))
+#endif
+		return l;
+	bits = *s++ - '0';
+	bits <<= 3;
+	bits += *s++ - '0';
+	bits <<= 3;
+	bits += *s++ - '0';
+	bits <<= 3;
+	bits += *s++ - '0';
+	s += l;
+	while(bits) {
+		if (bits & 1) {
+			l += *s;
+			s += *s;
+			++s;
+		}
+		bits >>= 1;
+	}
+	return l;
+}
+
 /*
  * dyna compare is required, to get all the shortest
  * salt strings first, then the next longer, then the
@@ -2401,11 +2474,32 @@ static int salt_compare(const void *x, const void *y)
 	   The first 2 bytes of string are length (base 8 ascii) */
 	const char *X = *((const char**)x);
 	const char *Y = *((const char**)y);
+	int l1, l2, l;
 	if (*X<*Y) return -1;
 	if (*X>*Y) return 1;
 	if (X[1]<Y[1]) return -1;
 	if (X[1]>Y[1]) return 1;
-	return 0;
+
+	// we had to make the salt order 100% deterministic, so that intersalt-restore
+	l = l1 = dynamic_this_salt_length(X);
+	l2 = dynamic_this_salt_length(Y);
+	if (l2 < l) l = l2;
+	l = memcmp(&X[6], &Y[6], l);
+	if (l) return l;
+	if (l1==l2) return 0;
+	if (l1 > l2) return 1;
+	return -1;
+}
+
+void dynamic_salt_md5(struct db_salt *s) {
+	MD5_CTX ctx;
+	int len;
+	const char *S = *((const char**)s->salt);
+
+	MD5_Init(&ctx);
+	len = dynamic_this_salt_length(S);
+	MD5_Update(&ctx, S + 6, len);
+	MD5_Final((unsigned char*)(s->salt_md5), &ctx);
 }
 
 /*********************************************************************************
@@ -7204,7 +7298,6 @@ int dynamic_SETUP(DYNAMIC_Setup *Setup, struct fmt_main *pFmt)
 	pFmt->params.format_name = "";
 	pFmt->params.benchmark_length = 0;		// NOTE 0 'assumes' salted. If unsalted, we set back to -1
 	pFmt->params.salt_size = 0;
-	pFmt->params.min_keys_per_crypt = 1;
 	curdat.using_flat_buffers_sse2_ok = 0;	// used to distingish MGF_NOTSSE2Safe from MGF_FLAT_BUFFERS
 	if ((Setup->flags & MGF_FLAT_BUFFERS) == MGF_FLAT_BUFFERS)
 		curdat.using_flat_buffers_sse2_ok = 1;
@@ -7230,6 +7323,9 @@ int dynamic_SETUP(DYNAMIC_Setup *Setup, struct fmt_main *pFmt)
 	pFmt->params.max_keys_per_crypt = MAX_KEYS_PER_CRYPT_X86;
 	pFmt->params.algorithm_name = ALGORITHM_NAME_X86;
 #endif
+	pFmt->params.min_keys_per_crypt = pFmt->params.max_keys_per_crypt;
+	if (pFmt->params.min_keys_per_crypt > 64)
+		pFmt->params.min_keys_per_crypt = 64;
 	dynamic_use_sse = curdat.dynamic_use_sse;
 
 	// Ok, set the new 'constants' data
@@ -7422,7 +7518,8 @@ int dynamic_SETUP(DYNAMIC_Setup *Setup, struct fmt_main *pFmt)
 		curdat.store_keys_normal_but_precompute_hash_to_output2 = 1;
 
 #define IF_CDOFF32(F,L) if (!curdat.store_keys_normal_but_precompute_hash_to_output2_base16_to_input1_offsetX) \
-	curdat.store_keys_normal_but_precompute_hash_to_output2_base16_to_input1_offsetX = (!!(Setup->startFlags&MGF_KEYS_BASE16_IN1_Offset_ ## F))*L
+	curdat.store_keys_normal_but_precompute_hash_to_output2_base16_to_input1_offsetX = \
+		(!!((Setup->startFlags&MGF_KEYS_BASE16_IN1_Offset_TYPE)==MGF_KEYS_BASE16_IN1_Offset_ ## F))*L
 
 	curdat.store_keys_normal_but_precompute_hash_to_output2_base16_to_input1_offsetX = 0;
 	IF_CDOFF32(MD5,32); IF_CDOFF32(MD4,32); IF_CDOFF32(SHA1,40); IF_CDOFF32(SHA224,56);
@@ -7924,7 +8021,9 @@ struct fmt_main *dynamic_THIN_FORMAT_LINK(struct fmt_main *pFmt, char *ciphertex
 		pFmt->params.plaintext_min_length = pFmtLocal->params.plaintext_min_length;
 	}
 	pFmt->params.max_keys_per_crypt = pFmtLocal->params.max_keys_per_crypt;
-	pFmt->params.min_keys_per_crypt = pFmtLocal->params.min_keys_per_crypt;
+	pFmt->params.min_keys_per_crypt = pFmtLocal->params.max_keys_per_crypt;
+	if (pFmt->params.min_keys_per_crypt > 64)
+		pFmt->params.min_keys_per_crypt = 64;
 	pFmt->params.flags = pFmtLocal->params.flags;
 	if (pFmtLocal->params.salt_size)
 		pFmt->params.salt_size = sizeof(void*);

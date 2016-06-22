@@ -117,7 +117,9 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 	if (strncmp(ciphertext, FORMAT_TAG, TAG_LENGTH) != 0)
 		return 0;
-
+	/* handle 'chopped' .pot lines */
+	if (ldr_isa_pot_source(ciphertext))
+		return 1;
 	ctcopy = strdup(ciphertext);
 	keeptr = ctcopy;
 	ctcopy += TAG_LENGTH;
@@ -246,14 +248,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 			strlen(saved_key[index]),
 			cur_salt->data, 16,
 			cur_salt->iter, master, 32, 0);
-#if !ARCH_LITTLE_ENDIAN
-		{
-			int i;
-			for (i = 0; i < 32/sizeof(ARCH_WORD_32); ++i) {
-				((ARCH_WORD_32*)master)[i] = JOHNSWAP(((ARCH_WORD_32*)master)[i]);
-			}
-		}
-#endif
 		if(blockchain_decrypt(master, cur_salt->data) == 0)
 			cracked[index] = 1;
 		else

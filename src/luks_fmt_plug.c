@@ -316,6 +316,9 @@ static void init(struct fmt_main *self)
 
 //	 This printf will 'help' debug a system that truncates that monster hash, but does not cause compiler to die.
 //	printf ("length=%d end=%s\n", strlen(fmt_luks.params.tests[0].ciphertext), &((fmt_luks.params.tests[0].ciphertext)[strlen(fmt_luks.params.tests[0].ciphertext)-30]));
+#ifdef _MSC_VER
+	LUKS_test_fixup();
+#endif
 }
 
 static void done(void)
@@ -341,6 +344,9 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	out = (unsigned char*)&cs.myphdr;
 	if (strncmp(ciphertext, "$luks$", 6) != 0)
 		return 0;
+	/* handle 'chopped' .pot lines */
+	if (ldr_isa_pot_source(ciphertext))
+		return 1;
 	ctcopy = strdup(ciphertext);
 	keeptr = ctcopy;
 	ctcopy += 6;
@@ -513,9 +519,12 @@ static void *get_binary(char *ciphertext)
 		unsigned char c[LUKS_DIGESTSIZE];
 		ARCH_WORD dummy;
 	} buf;
+
 	unsigned char *out = buf.c;
 	char *p;
 	int i;
+
+	/* should work just fine for redeced lengtth .pot format lines with no change */
 	p = strrchr(ciphertext, '$') + 1;
 	for (i = 0; i < LUKS_DIGESTSIZE; i++) {
 		out[i] =
@@ -577,13 +586,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		            (const unsigned char*)(cur_salt->myphdr.keyblock[cur_salt->bestslot].passwordSalt), LUKS_SALTSIZE,
 		            iterations, (unsigned char*)keycandidate[0], dklen, 0);
 #endif
-#if ARCH_LITTLE_ENDIAN==0
-		{
-			int kb = john_ntohl(cur_salt->myphdr.keyBytes)>>2;
-			for (i = 0; i < kb; ++i)
-				keycandidate[0][i] = JOHNSWAP(keycandidate[0][i]);
-		}
-#endif
 		for (i = 0; i < MAX_KEYS_PER_CRYPT; ++i) {
 			// Decrypt the blocksi
 			decrypt_aes_cbc_essiv(cur_salt->cipherbuf, af_decrypted, (unsigned char*)keycandidate[i], cur_salt->afsize, cur_salt);
@@ -608,10 +610,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		            john_ntohl(cur_salt->myphdr.mkDigestIterations),
 		            (unsigned char*)crypt_out[index], LUKS_DIGESTSIZE, 0);
 
-#endif
-#if ARCH_LITTLE_ENDIAN==0
-		for (i = 0; i < LUKS_DIGESTSIZE/4; ++i)
-			crypt_out[index][i] = JOHNSWAP(crypt_out[index][i]);
 #endif
 		MEM_FREE(af_decrypted);
 	}

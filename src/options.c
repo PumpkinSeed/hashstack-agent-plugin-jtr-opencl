@@ -1,6 +1,6 @@
 /*
  * This file is part of John the Ripper password cracker,
- * Copyright (c) 1996-2015 by Solar Designer
+ * Copyright (c) 1996-2016 by Solar Designer
  *
  * ...with changes in the jumbo patch, by JimF and magnum (and various others?)
  *
@@ -99,9 +99,6 @@ static struct opt_entry opt_list[] = {
 	{"input-encoding", FLG_INPUT_ENC, FLG_INPUT_ENC,
 		0, 0, OPT_FMT_STR_ALLOC, &encoding_str},
 	{"internal-codepage", FLG_SECOND_ENC, FLG_SECOND_ENC,
-		0, 0, OPT_FMT_STR_ALLOC, &internal_cp_str},
-	/* -internal-encoding is a deprecated alias for -internal-codepage */
-	{"internal-encoding", FLG_SECOND_ENC, FLG_SECOND_ENC,
 		0, 0, OPT_FMT_STR_ALLOC, &internal_cp_str},
 	{"target-encoding", FLG_SECOND_ENC, FLG_SECOND_ENC,
 		0, 0, OPT_FMT_STR_ALLOC, &target_enc_str},
@@ -232,7 +229,7 @@ static struct opt_entry opt_list[] = {
 	{"max-length", FLG_ZERO, 0, FLG_CRACKING_CHK, OPT_REQ_PARAM,
 		"%u", &options.req_maxlength},
 	{"max-run-time", FLG_ZERO, 0, FLG_CRACKING_CHK, OPT_REQ_PARAM,
-		"%u", &options.max_run_time},
+		"%d", &options.max_run_time},
 	{"progress-every", FLG_ZERO, 0, FLG_CRACKING_CHK, OPT_REQ_PARAM,
 		"%u", &options.status_interval},
 	{"regen-lost-salts", FLG_ZERO, 0, FLG_CRACKING_CHK, OPT_REQ_PARAM,
@@ -296,7 +293,7 @@ static struct opt_entry opt_list[] = {
 
 #define JOHN_USAGE	  \
 "John the Ripper " JTR_GIT_VERSION _MP_VERSION DEBUG_STRING MEMDBG_STRING ASAN_STRING UBSAN_STRING " [" JOHN_BLD "]\n" \
-"Copyright (c) 1996-2015 by " JOHN_COPYRIGHT "\n" \
+"Copyright (c) 1996-2016 by " JOHN_COPYRIGHT "\n" \
 "Homepage: http://www.openwall.com/john/\n" \
 "\n" \
 "Usage: %s [OPTIONS] [PASSWORD-FILES]\n" \
@@ -308,7 +305,7 @@ static struct opt_entry opt_list[] = {
 PRINCE_USAGE \
 "--encoding=NAME           input encoding (eg. UTF-8, ISO-8859-1). See also\n" \
 "                          doc/ENCODING and --list=hidden-options.\n" \
-"--rules[=SECTION]         enable word mangling rules for wordlist or PRINCE\n" \
+"--rules[=(SECTION|:rule)] enable word mangling rules for wordlist or PRINCE\n" \
 "--incremental[=MODE]      \"incremental\" mode [using section MODE]\n" \
 "--mask[=MASK]             mask mode using MASK (or default mask from john.conf)\n" \
 "--markov[=OPTIONS]        \"Markov\" mode (see doc/MARKOV)\n" \
@@ -394,7 +391,8 @@ void opt_print_hidden_usage(void)
 	puts("--crack-status            emit a status line whenever a password is cracked");
 	puts("--keep-guessing           try more candidates for cracked hashes (ie. search");
 	puts("                          for plaintext collisions)");
-	puts("--max-run-time=N          gracefully exit after this many seconds");
+	puts("--max-run-time=[-]N       gracefully exit after this many seconds. If");
+	puts("                          negative, reset timer on each crack");
 	puts("--regen-lost-salts=N      brute force unknown salts (see doc/OPTIONS)");
 	puts("--mkv-stats=FILE          \"Markov\" stats file (see doc/MARKOV)");
 	puts("--reject-printable        reject printable binaries");
@@ -406,7 +404,7 @@ void opt_print_hidden_usage(void)
 	puts("--stress-test[=TIME]      loop self tests forever");
 #ifdef HAVE_FUZZ
 	puts("--fuzz[=DICTFILE]         fuzz formats' prepare(), valid() and split()");
-	puts("--fuzz-dump[=from,to]     dump the fuzzed hashes between from and to to file pwfile.format");
+	puts("--fuzz-dump[=FROM,TO]     dump the fuzzed hashes between FROM and TO to file pwfile.format");
 #endif
 	puts("--input-encoding=NAME     input encoding (alias for --encoding)");
 	puts("--internal-codepage=NAME  codepage used in rules/masks (see doc/ENCODING)");

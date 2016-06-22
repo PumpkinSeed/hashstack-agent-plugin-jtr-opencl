@@ -34,7 +34,7 @@
 #define pbkdf2_sha1_sse pbkdf1_sha1_sse
 #endif
 
-#if !defined(SIMD_COEF_32) || defined (PBKDF2_HMAC_SHA1_ALSO_INCLUDE_CTX)
+#if !defined(SIMD_COEF_32) || defined(PBKDF2_HMAC_SHA1_ALSO_INCLUDE_CTX) || defined(OPENCL_FORMAT)
 
 static void _pbkdf2_sha1_load_hmac(const unsigned char *K, int KL, SHA_CTX *pIpad, SHA_CTX *pOpad) {
 	unsigned char ipad[SHA_CBLOCK], opad[SHA_CBLOCK], k0[SHA_DIGEST_LENGTH];
@@ -126,11 +126,7 @@ static void pbkdf2_sha1(const unsigned char *K, int KL, const unsigned char *S, 
 	while (loop <= loops) {
 		_pbkdf2_sha1(S,SL,R,tmp.x32,loop,&ipad,&opad);
 		for (i = skip_bytes%SHA_DIGEST_LENGTH; i < SHA_DIGEST_LENGTH && accum < outlen; i++) {
-#if ARCH_LITTLE_ENDIAN
 			out[accum++] = ((uint8_t*)tmp.out)[i];
-#else
-			out[accum++] = ((uint8_t*)tmp.out)[i^3];
-#endif
 		}
 		loop++;
 		skip_bytes = 0;
@@ -290,11 +286,7 @@ static void pbkdf2_sha1_sse(const unsigned char *K[SSE_GROUP_SZ_SHA1], int KL[SS
 		alter_endianity(dgst, sizeof(dgst));
 		for (i = skip_bytes%SHA_DIGEST_LENGTH; i < SHA_DIGEST_LENGTH && accum < outlen; ++i) {
 			for (j = 0; j < SSE_GROUP_SZ_SHA1; ++j) {
-#if ARCH_LITTLE_ENDIAN
 				out[j][accum] = ((unsigned char*)(dgst[j]))[i];
-#else
-				out[j][accum] = ((unsigned char*)(dgst[j]))[i^3];
-#endif
 			}
 			++accum;
 		}

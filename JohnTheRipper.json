@@ -1,60 +1,6 @@
 {
     "algorithms": [
         {
-            "algorithm": "Kerberos AFS", 
-            "device": "cpu", 
-            "mode": "AFS", 
-            "tasksize": 123600000
-        }, 
-        {
-            "algorithm": "Eggdrop", 
-            "device": "gpu", 
-            "mode": "bfegg", 
-            "tasksize": 2227560
-        }, 
-        {
-            "algorithm": "Blackberry Enterprise Service 10", 
-            "device": "cpu", 
-            "mode": "blackberry-es10", 
-            "tasksize": 2339280
-        }, 
-        {
-            "algorithm": "BSDi", 
-            "device": "cpu", 
-            "mode": "bsdicrypt", 
-            "tasksize": 9984000
-        }, 
-        {
-            "algorithm": "Clipperz Password Manager", 
-            "device": "cpu", 
-            "mode": "Clipperz", 
-            "tasksize": 2596800
-        }, 
-        {
-            "algorithm": "Rational ClearQuest", 
-            "device": "cpu", 
-            "mode": "cq", 
-            "tasksize": 5983560000
-        }, 
-        {
-            "algorithm": "Dahua CCTV DVR", 
-            "device": "cpu", 
-            "mode": "dahua", 
-            "tasksize": 405000000
-        }, 
-        {
-            "algorithm": "Django (scrypt)", 
-            "device": "cpu", 
-            "mode": "django-scrypt", 
-            "tasksize": 2256
-        }, 
-        {
-            "algorithm": "DIGEST-MD5 C/R", 
-            "device": "cpu", 
-            "mode": "dmd5", 
-            "tasksize": 138480000
-        }, 
-        {
             "algorithm": "Apple DMG", 
             "device": "gpu", 
             "mode": "dmg-opencl", 
@@ -65,18 +11,6 @@
             "device": "cpu", 
             "mode": "EFS", 
             "tasksize": 78840
-        }, 
-        {
-            "algorithm": "EIGRP MD5", 
-            "device": "cpu", 
-            "mode": "eigrp", 
-            "tasksize": 325320000
-        }, 
-        {
-            "algorithm": "EIGRP HMAC-SHA256", 
-            "device": "cpu", 
-            "mode": "eigrp", 
-            "tasksize": 40665000
         }, 
         {
             "algorithm": "EncFS", 
@@ -91,30 +25,6 @@
             "tasksize": 31145760
         }, 
         {
-            "algorithm": "HAVAL-128-4", 
-            "device": "cpu", 
-            "mode": "HAVAL-128-4", 
-            "tasksize": 228600000
-        }, 
-        {
-            "algorithm": "HAVAL-256-3", 
-            "device": "cpu", 
-            "mode": "HAVAL-256-3", 
-            "tasksize": 329400000
-        }, 
-        {
-            "algorithm": "HTTP Digest Authentication", 
-            "device": "cpu", 
-            "mode": "hdaa", 
-            "tasksize": 432720000
-        }, 
-        {
-            "algorithm": "KeePass", 
-            "device": "cpu", 
-            "mode": "KeePass", 
-            "tasksize": 7200
-        }, 
-        {
             "algorithm": "Mac OS X Keychain", 
             "device": "gpu", 
             "mode": "keychain-opencl", 
@@ -127,52 +37,10 @@
             "tasksize": 29399280
         }, 
         {
-            "algorithm": "Java KeyStore", 
-            "device": "cpu", 
-            "mode": "keystore", 
-            "tasksize": 22510920
-        }, 
-        {
-            "algorithm": "OpenSSH known_hosts", 
-            "device": "cpu", 
-            "mode": "known_hosts", 
-            "tasksize": 263280000
-        }, 
-        {
-            "algorithm": "Kerberos v4 TGT", 
-            "device": "cpu", 
-            "mode": "krb4", 
-            "tasksize": 23363640
-        }, 
-        {
-            "algorithm": "Kerberos v5 TGT", 
-            "device": "cpu", 
-            "mode": "krb5", 
-            "tasksize": 5175960
-        }, 
-        {
-            "algorithm": "Kerberos 5 db etype 18", 
-            "device": "cpu", 
-            "mode": "krb5-18", 
-            "tasksize": 82560
-        }, 
-        {
-            "algorithm": "Kerberos 5 AS-REQ Pre-Auth etype 17/18", 
-            "device": "cpu", 
-            "mode": "krb5pa-sha1", 
-            "tasksize": 76920
-        }, 
-        {
             "algorithm": "KDE KWallet", 
             "device": "cpu", 
             "mode": "kwallet", 
             "tasksize": 251640
-        }, 
-        {
-            "algorithm": "LastPass (sniffed session)", 
-            "device": "cpu", 
-            "mode": "lastpass", 
-            "tasksize": 601440
         }, 
         {
             "algorithm": "LUKS", 
@@ -181,76 +49,10 @@
             "tasksize": 2352
         }, 
         {
-            "algorithm": "MD2", 
-            "device": "cpu", 
-            "mode": "MD2", 
-            "tasksize": 9241800
-        }, 
-        {
-            "algorithm": "MDC-2", 
-            "device": "cpu", 
-            "mode": "mdc2", 
-            "tasksize": 36504840
-        }, 
-        {
-            "algorithm": "MongoDB", 
-            "device": "cpu", 
-            "mode": "MongoDB", 
-            "tasksize": 291360000
-        }, 
-        {
             "algorithm": "Mozilla key3.db", 
             "device": "cpu", 
             "mode": "mozilla", 
             "tasksize": 32139840
-        }, 
-        {
-            "algorithm": "MSCHAPv2 C/R", 
-            "device": "cpu", 
-            "mode": "MSCHAPv2", 
-            "tasksize": 3094320000
-        }, 
-        {
-            "algorithm": "Net MD5 (RIPv2, OSPF, BGP, SNMPv2)", 
-            "device": "cpu", 
-            "mode": "net-md5", 
-            "tasksize": 686520000
-        }, 
-        {
-            "algorithm": "Net SHA1 (BFD)", 
-            "device": "cpu", 
-            "mode": "net-sha1", 
-            "tasksize": 651960000
-        }, 
-        {
-            "algorithm": "NetLM C/R (Half)", 
-            "device": "cpu", 
-            "mode": "nethalflm", 
-            "tasksize": 134520000
-        }, 
-        {
-            "algorithm": "NetLM C/R", 
-            "device": "cpu", 
-            "mode": "netlm", 
-            "tasksize": 92170560
-        }, 
-        {
-            "algorithm": "NetLMv2 C/R", 
-            "device": "cpu", 
-            "mode": "netlmv2", 
-            "tasksize": 81348840
-        }, 
-        {
-            "algorithm": "Nuked-Klan CMS", 
-            "device": "cpu", 
-            "mode": "nk", 
-            "tasksize": 178080000
-        }, 
-        {
-            "algorithm": "Oracle O5LOGON", 
-            "device": "gpu", 
-            "mode": "o5logon-opencl", 
-            "tasksize": 793440000
         }, 
         {
             "algorithm": "Open Document Format", 
@@ -259,34 +61,10 @@
             "tasksize": 2195160
         }, 
         {
-            "algorithm": "OpenBSD Softraid", 
-            "device": "cpu", 
-            "mode": "OpenBSD-SoftRAID", 
-            "tasksize": 43680
-        }, 
-        {
-            "algorithm": "OpenVMS", 
-            "device": "cpu", 
-            "mode": "OpenVMS", 
-            "tasksize": 66759360
-        }, 
-        {
-            "algorithm": "Panama", 
-            "device": "cpu", 
-            "mode": "Panama", 
-            "tasksize": 51890280
-        }, 
-        {
             "algorithm": "PFX, PKCS12 (.pfx, .p12)", 
             "device": "cpu", 
             "mode": "PFX", 
             "tasksize": 899160
-        }, 
-        {
-            "algorithm": "Post.Office", 
-            "device": "cpu", 
-            "mode": "po", 
-            "tasksize": 310920000
         }, 
         {
             "algorithm": "Microsoft Outlook PST", 
@@ -301,120 +79,36 @@
             "tasksize": 14505240
         }, 
         {
-            "algorithm": "RAR 5.x", 
-            "device": "gpu", 
-            "mode": "RAR5-opencl", 
-            "tasksize": 2716440
-        }, 
-        {
-            "algorithm": "BLAKE2b", 
-            "device": "cpu", 
-            "mode": "Raw-Blake2", 
-            "tasksize": 258960000
-        }, 
-        {
-            "algorithm": "RipeMD128", 
-            "device": "cpu", 
-            "mode": "ripemd-128", 
-            "tasksize": 424680000
-        }, 
-        {
-            "algorithm": "sha1crypt", 
-            "device": "gpu", 
-            "mode": "sha1crypt-opencl", 
-            "tasksize": 4572240
-        }, 
-        {
-            "algorithm": "Siemens S7", 
-            "device": "cpu", 
-            "mode": "Siemens-S7", 
-            "tasksize": 111015360
-        }, 
-        {
-            "algorithm": "SIP", 
-            "device": "cpu", 
-            "mode": "SIP", 
-            "tasksize": 200760000
-        }, 
-        {
             "algorithm": "SSH Private Key", 
             "device": "cpu", 
             "mode": "SSH-ng", 
             "tasksize": 39515880
-        }, 
-        {
-            "algorithm": "STRIP Password Manager", 
-            "device": "gpu", 
-            "mode": "strip-opencl", 
-            "tasksize": 15572880
-        }, 
-        {
-            "algorithm": "StarOffice SXC", 
-            "device": "gpu", 
-            "mode": "sxc-opencl", 
-            "tasksize": 2206680
-        }, 
-        {
-            "algorithm": "Sybase PROP", 
-            "device": "cpu", 
-            "mode": "Sybase-PROP", 
-            "tasksize": 36612120
-        }, 
-        {
-            "algorithm": "TCP MD5 Signatures, BGP", 
-            "device": "cpu", 
-            "mode": "tcp-md5", 
-            "tasksize": 389760000
-        }, 
-        {
-            "algorithm": "Trip Code", 
-            "device": "cpu", 
-            "mode": "tripcode", 
-            "tasksize": 278160000
-        }, 
-        {
-            "algorithm": "VNC", 
-            "device": "cpu", 
-            "mode": "VNC", 
-            "tasksize": 216480000
-        }, 
-        {
-            "algorithm": "WoWSRP, Battlenet", 
-            "device": "cpu", 
-            "mode": "WoWSRP", 
-            "tasksize": 5320320
-        }, 
-        {
-            "algorithm": "ZIP",
-            "device": "cpu",
-            "mode": "PKZIP",
-            "tasksize": 603000000
         }
     ], 
     "attacks": [
         {
             "attack": "dictionary", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat/hashcat64.bin --stdout -a 0 -s %skip% -l %limit% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "combinator", 
-            "command": "/opt/hashstack/programs/utils/combinator.bin -s %skip% -l %limit% %left_wordlist% %right_wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat/hashcat64.bin --stdout -a 1 -s %skip% -l %limit% %left_wordlist% %right_wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "mask", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin -a 3 --stdout -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat/hashcat64.bin --stdout -a 3 -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "rules", 
-            "command": "/opt/hashstack/programs/hashcat-cli/hashcat-cli64.bin --stdout -s %skip% -l %limit% %wordlist% -r %rules% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat/hashcat64.bin --stdout -a 0 -s %skip% -l %limit% %wordlist% -r %rules% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "hybridLeft", 
-            "command": "/opt/hashstack/programs/utils/hybrid_6.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %wordlist% %mask% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat/hashcat64.bin --stdout -a 6 -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %wordlist% %mask% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }, 
         {
             "attack": "hybridRight", 
-            "command": "/opt/hashstack/programs/utils/hybrid_7.bin -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
+            "command": "/opt/hashstack/programs/hashcat/hashcat64.bin --stdout -a 7 -s %skip% -l %limit% %cs1% %cs2% %cs3% %cs4% %mask% %wordlist% | /opt/hashstack/programs/JohnTheRipper/john --stdin --session=%id% %dev% --pot=%potfile% --format=%mode% %hashfile%"
         }
     ], 
     "is_oclHashcat": false
